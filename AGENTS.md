@@ -32,13 +32,13 @@ it does **not** provision the cluster.
 These reflect the verified Kubeflow **26.03** layout. Code must conform to them.
 
 - **Object store is SeaweedFS**, reachable at **`seaweedfs.kubeflow:8333`** (S3).
-  There is **no MinIO workload**. Never name resources, buckets, or env vars
-  "minio" in this repo's own code. (The upstream `minio-service` Service and
-  `mlpipeline-minio-artifact` Secret are SeaweedFS-backed compatibility shims —
-  leave them alone; do not rename or delete them.)
-- **S3 credentials** are the existing cluster Secret `mlpipeline-minio-artifact`
-  (`accesskey=minio`, `secretkey=minio123`). MLflow and KServe use these real
-  credentials. SeaweedFS 26.03 is **not** anonymous — dummy creds will fail.
+  Name the lab's own object-store resources, buckets, and env vars after
+  `seaweedfs` / `s3` / `object-store` — never after any legacy object store.
+- **S3 credentials:** SeaweedFS 26.03 runs with IAM (not anonymous), so real
+  credentials are required. The lab ships its own `cv-lab` Secret
+  `seaweedfs-s3-credentials` (consumed by MLflow and KServe); populate it with the
+  cluster's SeaweedFS S3 credentials. Kubernetes Secrets are namespace-scoped —
+  do not read the cluster's object-store Secret across namespaces.
 - **The only permitted change to the `kubeflow` namespace** is one additive
   `NetworkPolicy` allowing `cv-lab → seaweedfs:8333`. Do not patch, delete, or
   re-point any upstream Kubeflow resource.

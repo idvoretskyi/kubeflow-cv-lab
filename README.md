@@ -56,11 +56,11 @@ This lab targets the object-store and networking layout shipped in Kubeflow
 **26.03**:
 
 - **Object store:** SeaweedFS is the default store, reachable in-cluster at
-  **`seaweedfs.kubeflow:8333`** (S3). There is **no MinIO** — only a Service named
-  `minio-service` kept for KFP backward compatibility, backed by SeaweedFS.
-- **S3 credentials:** SeaweedFS runs with `-iam` and configures an admin user from
-  the existing `mlpipeline-minio-artifact` Secret (`accesskey=minio`,
-  `secretkey=minio123`). MLflow and KServe reuse those credentials.
+  **`seaweedfs.kubeflow:8333`** (S3).
+- **S3 credentials:** SeaweedFS runs its S3 gateway with IAM enabled, so real
+  credentials are required. The lab keeps a matching set in its own `cv-lab` Secret
+  that MLflow and KServe read — populate it with your cluster's object-store S3
+  credentials (see [`secrets/`](secrets/)).
 - **Cross-namespace access:** SeaweedFS is guarded by a `NetworkPolicy` that only
   admits `kubeflow-profile` namespaces, `istio-system`, and same-namespace pods on
   port `8333`. The lab adds **one** additive `NetworkPolicy` so the `cv-lab`
