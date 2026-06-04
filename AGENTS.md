@@ -12,14 +12,19 @@ cluster (Kubeflow **26.03** on Linode/Akamai LKE). The loop is:
 > evaluate → register) → self-hosted MLflow (tracking + registry) → KServe
 > InferenceService → `supervision` visualization.
 
+This repo also ships a **portable Kubeflow installer** (`platform/`) for any
+GPU-enabled Kubernetes cluster.
+
 The companion infrastructure repo is `akamai-lke-gpu-cluster`
-(GitHub: `idvoretskyi/linode-gpu-k8s`). This repo only contains the lab workload;
-it does **not** provision the cluster.
+(GitHub: `idvoretskyi/linode-gpu-k8s`). That repo provisions the cluster and
+installs the NVIDIA GPU operator; it does **not** install Kubeflow.
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
+| `platform/` | Portable Kubeflow installer: `install.sh`, `uninstall.sh`, `config.env.example`, `README.md`. |
+| `examples/kubeflow-pipelines/` | Hello-world + GPU smoke-test pipelines. Doubles as post-install smoke test. |
 | `deploy/` | Cluster manifests (kustomize): `cv-lab` namespace, the additive SeaweedFS NetworkPolicy, Postgres, MLflow server. |
 | `pipeline/` | Kubeflow Pipeline (KFP v2): `load_data → train → evaluate → register`. Source `pipeline.py` + committed compiled `pipeline.yaml`. |
 | `images/` | Container images that must be built/pushed (KServe serving predictor). |
@@ -52,6 +57,26 @@ These reflect the verified Kubeflow **26.03** layout. Code must conform to them.
 - **Namespace:** the lab's own resources (MLflow, Postgres, KServe) live in
   `cv-lab`. Pipeline pods run in the `kubeflow` namespace.
 
+## platform/ invariants
+
+- `platform/install.sh` and `platform/uninstall.sh` must be POSIX sh (not bash).
+  Run `shellcheck` on them before committing.
+- The **GPU operator is an external prerequisite** — it must be running on the
+  cluster before `platform/install.sh` is called. Never install the GPU operator
+  from these scripts.
+- CIDR parameterization: `KF_APISERVER_CIDRS` and `KF_POD_CIDR` default to the
+  Linode/LKE values (`192.168.128.0/17`, `10.2.0.0/16`). Setting either to `""`
+  skips the NetworkPolicy patch. Document any new cloud-specific defaults in
+  `platform/config.env.example`.
+- `platform/config.env` is git-ignored. Only `config.env.example` is committed.
+
+## examples/ conventions
+
+- `examples/kubeflow-pipelines/` contains the hello-world and GPU smoke-test
+  pipelines. Always commit the compiled `*.yaml` alongside any `*.py` changes.
+- These pipelines follow the **GPU scheduling contract** above (see
+  `gpu_pipeline.py`).
+
 ## Conventions
 
 - **Pipelines:** KFP v2 SDK (`kfp>=2`, `kfp-kubernetes`). Always commit the
@@ -72,14 +97,17 @@ These reflect the verified Kubeflow **26.03** layout. Code must conform to them.
 ## Build / lint / test
 
 ```bash
-make venv      # virtualenv with the KFP SDK
-make compile   # pipeline.py -> pipeline.yaml (commit the result)
-make lint      # ruff + yamllint
-make deploy    # kubectl apply -k deploy/   (needs a kubeconfig)
+make platform-install    # install Kubeflow (needs a kubeconfig)
+make venv                # virtualenv with the KFP SDK
+make compile             # pipeline.py -> pipeline.yaml (commit the result)
+make examples-compile    # examples/kubeflow-pipelines/*.py -> *.yaml
+make lint                # ruff + yamllint
+make deploy              # kubectl apply -k deploy/   (needs a kubeconfig)
 ```
 
 CI (`.github/workflows/ci.yml`) runs: `ruff`, `yamllint`, `kubeconform`,
-`markdownlint`, and a KFP compile-drift check. Keep it green.
+`markdownlint`, `shellcheck` (for `platform/*.sh`), and a KFP compile-drift
+check (includes `examples/kubeflow-pipelines/`). Keep it green.
 
 ## Guardrails
 

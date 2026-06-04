@@ -28,6 +28,18 @@ jobs:
       - name: Run ruff
         run: ruff check .
 
+  shellcheck:
+    name: Shell lint (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run shellcheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: "./platform"
+
   yamllint:
     name: YAML lint
     runs-on: ubuntu-latest
@@ -80,12 +92,23 @@ jobs:
         run: |
           if [ ! -f pipeline/pipeline.py ]; then
             echo "pipeline/pipeline.py not present yet (added in a later phase)."
-            exit 0
+          else
+            pip install -r pipeline/requirements.txt
+            python pipeline/pipeline.py
+            if ! git diff --exit-code -- pipeline/pipeline.yaml; then
+              echo "::error::pipeline.yaml is out of date. Run 'make compile' and commit the result."
+              exit 1
+            fi
           fi
-          pip install -r pipeline/requirements.txt
-          python pipeline/pipeline.py
-          if ! git diff --exit-code -- pipeline/pipeline.yaml; then
-            echo "::error::pipeline.yaml is out of date. Run 'make compile' and commit the result."
+
+      - name: Compile examples and check for drift
+        run: |
+          pip install -r examples/kubeflow-pipelines/requirements.txt
+          python examples/kubeflow-pipelines/hello_pipeline.py
+          python examples/kubeflow-pipelines/gpu_pipeline.py
+          if ! git diff --exit-code -- examples/kubeflow-pipelines/hello_pipeline.yaml \
+                                        examples/kubeflow-pipelines/gpu_pipeline.yaml; then
+            echo "::error::example pipeline YAML is out of date. Run 'make examples-compile' and commit."
             exit 1
           fi
 

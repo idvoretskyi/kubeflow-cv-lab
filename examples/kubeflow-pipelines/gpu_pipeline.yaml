@@ -1,0 +1,47 @@
+# PIPELINE DEFINITION
+# Name: gpu-smoke-test
+# Description: Runs nvidia-smi on the dedicated GPU pool to validate GPU scheduling.
+components:
+  comp-nvidia-smi:
+    executorLabel: exec-nvidia-smi
+deploymentSpec:
+  executors:
+    exec-nvidia-smi:
+      container:
+        command:
+        - nvidia-smi
+        image: nvidia/cuda:12.4.1-base-ubuntu22.04
+        resources:
+          accelerator:
+            count: '1'
+            resourceCount: '1'
+            resourceType: nvidia.com/gpu
+            type: nvidia.com/gpu
+pipelineInfo:
+  description: Runs nvidia-smi on the dedicated GPU pool to validate GPU scheduling.
+  name: gpu-smoke-test
+root:
+  dag:
+    tasks:
+      nvidia-smi:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-nvidia-smi
+        taskInfo:
+          name: nvidia-smi
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.16.1
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-nvidia-smi:
+          nodeSelector:
+            labels:
+              nodepool.lke/role: gpu
+          tolerations:
+          - effect: NoSchedule
+            key: nvidia.com/gpu
+            operator: Exists

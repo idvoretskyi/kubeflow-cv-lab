@@ -6,7 +6,7 @@
 [![MLflow](https://img.shields.io/badge/MLflow-tracking%20%2B%20registry-0194E2?logo=mlflow&logoColor=white)](https://mlflow.org)
 [![Ultralytics YOLO](https://img.shields.io/badge/Ultralytics-YOLOv8-111F68)](https://docs.ultralytics.com)
 
-A hands-on, newcomer-friendly **computer-vision MLOps lab** that runs entirely on a
+A hands-on, newcomer-friendly **computer-vision MLOps lab** that runs on a
 GPU-enabled Kubeflow cluster. It wires together the open-source Roboflow stack,
 Kubeflow Pipelines, MLflow, and KServe into a single end-to-end loop:
 
@@ -14,14 +14,14 @@ Kubeflow Pipelines, MLflow, and KServe into a single end-to-end loop:
 > evaluate → register) → self-hosted MLflow (tracking + registry) →
 > KServe InferenceService → `supervision` visualization.**
 
-It is designed to run on top of the GPU LKE cluster from
-[`akamai-lke-gpu-cluster`](https://github.com/idvoretskyi/linode-gpu-k8s)
-(Kubeflow **26.03**), but the manifests are generic enough for any Kubeflow 26.03
-install that uses the default SeaweedFS object store.
+This repo also ships a **portable Kubeflow installer** (`platform/`) that works
+on any GPU-enabled Kubernetes cluster. Tested on Linode/Akamai LKE with Kubeflow
+**26.03**. The companion cluster-provisioning repo is
+[`akamai-lke-gpu-cluster`](https://github.com/idvoretskyi/linode-gpu-k8s).
 
 > **Status:** scaffolding. The cluster manifests, pipeline, serving image, and
-> notebook are added in later phases (see [Roadmap](#roadmap)). This first drop is
-> the repository baseline (docs, CI, conventions).
+> notebook are added in later phases (see [Roadmap](#roadmap)). The platform
+> installer and demo pipelines are ready now.
 
 ## Architecture
 
@@ -50,25 +50,95 @@ install that uses the default SeaweedFS object store.
 | Serving | KServe `InferenceService` | `cv-lab` ns |
 | Visualization | `supervision` | notebook |
 
-## Cluster assumptions (Kubeflow 26.03)
+## Prerequisites
 
-This lab targets the object-store and networking layout shipped in Kubeflow
-**26.03**:
+| Requirement | Notes |
+|---|---|
+| Kubernetes cluster | Any distribution with GPU nodes |
+| **NVIDIA GPU operator** | Must be running before `make platform-install`; see [GPU operator docs](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html) or use [`akamai-lke-gpu-cluster`](https://github.com/idvoretskyi/linode-gpu-k8s) |
+| Default `StorageClass` | Required for Kubeflow and lab PVCs |
+| `kubectl`, `kustomize`, `git` | For the platform installer |
+| Python 3.11+ | For pipeline compilation |
+
+## Platform (Kubeflow)
+
+The `platform/` directory contains a portable Kubeflow installer that works on
+any GPU-enabled Kubernetes cluster.
+
+```bash
+# Optional: configure for your cloud (defaults are correct for LKE)
+cp platform/config.env.example platform/config.env
+$EDITOR platform/config.env
+
+# Install Kubeflow 26.03
+make platform-install
+
+# Access the Central Dashboard
+kubectl port-forward -n istio-system svc/istio-ingressgateway 8080:80
+# http://localhost:8080  (default: user@example.com / 12341234)
+```
+
+See [`platform/README.md`](platform/README.md) for full documentation, including
+how to set the correct CIDRs for non-LKE clouds.
+
+## Deploy order (full lab)
+
+```bash
+# 1. Provision a GPU Kubernetes cluster (e.g. with akamai-lke-gpu-cluster)
+#    and install the NVIDIA GPU operator.
+
+# 2. Install Kubeflow
+make platform-install
+
+# 3. Deploy the lab (namespace, NetworkPolicy, Postgres, MLflow)
+kubectl apply -k deploy/
+
+# 4. Create secrets from the templates
+cp secrets/seaweedfs-s3-credentials.example.yaml secrets/seaweedfs-s3-credentials.yaml
+# edit, then: kubectl apply -f secrets/seaweedfs-s3-credentials.yaml -n cv-lab
+cp secrets/roboflow-api-key.example.yaml secrets/roboflow-api-key.yaml
+# edit, then: kubectl apply -f secrets/roboflow-api-key.yaml -n kubeflow
+
+# 5. Compile and upload the pipeline
+make venv && make compile
+kubectl -n kubeflow port-forward svc/ml-pipeline-ui 8080:80
+# http://localhost:8080 → Pipelines → Upload → pipeline/pipeline.yaml → Create run
+
+# 6. Watch experiments
+kubectl -n cv-lab port-forward svc/mlflow 5000:5000   # http://localhost:5000
+
+# 7. Serve the trained model and visualize predictions
+kubectl apply -f serving/
+# run notebooks/explore.ipynb
+```
+
+## Smoke test
+
+Before running the full lab pipeline, validate Kubeflow with the bundled demo
+pipelines:
+
+```bash
+make examples-compile
+kubectl -n kubeflow port-forward svc/ml-pipeline-ui 8080:80
+# Upload examples/kubeflow-pipelines/hello_pipeline.yaml and run it.
+# Then upload gpu_pipeline.yaml — it should run nvidia-smi on the GPU pool.
+```
+
+See [`examples/kubeflow-pipelines/README.md`](examples/kubeflow-pipelines/README.md).
+
+## Cluster assumptions (Kubeflow 26.03)
 
 - **Object store:** SeaweedFS is the default store, reachable in-cluster at
   **`seaweedfs.kubeflow:8333`** (S3).
-- **S3 credentials:** SeaweedFS runs its S3 gateway with IAM enabled, so real
-  credentials are required. The lab keeps a matching set in its own `cv-lab` Secret
-  that MLflow and KServe read — populate it with your cluster's object-store S3
-  credentials (see [`secrets/`](secrets/)).
-- **Cross-namespace access:** SeaweedFS is guarded by a `NetworkPolicy` that only
-  admits `kubeflow-profile` namespaces, `istio-system`, and same-namespace pods on
-  port `8333`. The lab adds **one** additive `NetworkPolicy` so the `cv-lab`
-  namespace can reach SeaweedFS. This is the **only** modification made to the
-  `kubeflow` namespace.
-- **GPU scheduling:** GPU nodes are tainted `nvidia.com/gpu=present:NoSchedule` and
-  labelled `nodepool.lke/role=gpu`. The training step adds the matching toleration,
-  node selector, and a GPU resource request.
+- **S3 credentials:** SeaweedFS runs its S3 gateway with IAM enabled. The lab
+  keeps a matching set in its own `cv-lab` Secret — populate it with your
+  cluster's object-store credentials (see [`secrets/`](secrets/)).
+- **Cross-namespace access:** the lab adds one additive `NetworkPolicy` so the
+  `cv-lab` namespace can reach SeaweedFS. This is the **only** modification made
+  to the `kubeflow` namespace.
+- **GPU scheduling:** GPU nodes are tainted `nvidia.com/gpu=present:NoSchedule`
+  and labelled `nodepool.lke/role=gpu`. The training step adds the matching
+  toleration, node selector, and GPU resource request.
 
 ## Repository layout
 
@@ -77,7 +147,10 @@ kubeflow-cv-lab/
 ├── README.md            # this file
 ├── AGENTS.md            # guide for AI agents and contributors
 ├── LICENSE              # MIT
-├── Makefile             # venv / compile / lint / deploy helpers
+├── Makefile             # venv / compile / lint / deploy / platform helpers
+├── platform/            # portable Kubeflow installer (install.sh, uninstall.sh, config)
+├── examples/
+│   └── kubeflow-pipelines/  # hello-world + GPU smoke-test pipelines
 ├── deploy/              # cluster manifests: namespace, NetworkPolicy, Postgres, MLflow
 ├── pipeline/            # Kubeflow Pipeline (KFP v2): load → train → evaluate → register
 ├── images/              # container images (KServe serving predictor)
@@ -86,33 +159,9 @@ kubeflow-cv-lab/
 └── secrets/             # *.example.yaml templates (real secrets are git-ignored)
 ```
 
-## Quick start
-
-> Requires the manifests/pipeline added in later phases. The flow will be:
-
-```bash
-# 1. Deploy the lab (namespace, NetworkPolicy, Postgres, MLflow)
-kubectl apply -k deploy/
-
-# 2. Create secrets from the templates in secrets/
-cp secrets/roboflow-api-key.example.yaml secrets/roboflow-api-key.yaml
-# edit, then: kubectl apply -f secrets/roboflow-api-key.yaml
-
-# 3. Compile and upload the pipeline
-make venv && make compile
-kubectl -n kubeflow port-forward svc/ml-pipeline-ui 8080:80
-# open http://localhost:8080 → Pipelines → Upload → pipeline/pipeline.yaml → Create run
-
-# 4. Watch experiments
-kubectl -n cv-lab port-forward svc/mlflow 5000:5000   # http://localhost:5000
-
-# 5. Serve the trained model and visualize predictions
-kubectl apply -f serving/
-# run notebooks/explore.ipynb
-```
-
 ## Roadmap
 
+- [x] **Phase 0** — platform installer (`platform/`) + demo pipelines (`examples/`)
 - [x] **Phase 1** — repository baseline (docs, CI, conventions)
 - [ ] **Phase 2** — `deploy/` manifests (namespace, NetworkPolicy, Postgres, MLflow)
 - [ ] **Phase 3** — `pipeline/` Kubeflow Pipeline (load → train → evaluate → register)
