@@ -3,6 +3,7 @@
 # Description: Dataset download → YOLOv8 GPU training → MLflow tracking & registry → model URI for KServe serving.
 # Inputs:
 #    dataset_url: str [Default: 'https://ultralytics.com/assets/coco128.zip']
+#    dataset_yaml_url: str [Default: 'https://raw.githubusercontent.com/ultralytics/ultralytics/main/ultralytics/cfg/datasets/coco128.yaml']
 #    epochs: int [Default: 10.0]
 #    experiment_name: str [Default: 'coco128-yolov8']
 #    imgsz: int [Default: 640.0]
@@ -36,6 +37,8 @@ components:
     inputDefinitions:
       parameters:
         dataset_url:
+          parameterType: STRING
+        dataset_yaml_url:
           parameterType: STRING
     outputDefinitions:
       artifacts:
@@ -159,35 +162,52 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef load_data(\n    dataset_url: str,\n    dataset: dsl.Output[dsl.Dataset],\n\
-          ) -> None:\n    \"\"\"Download a YOLOv8-format dataset zip from a URL and\
-          \ unpack it.\"\"\"\n    import pathlib\n    import shutil\n    import tempfile\n\
-          \    import zipfile\n\n    import requests\n    import yaml\n\n    # Download\
-          \ the zip.\n    with tempfile.TemporaryDirectory() as tmp:\n        zip_path\
-          \ = pathlib.Path(tmp) / \"dataset.zip\"\n        print(f\"Downloading {dataset_url}\
-          \ ...\")\n        with requests.get(dataset_url, stream=True, timeout=300)\
-          \ as r:\n            r.raise_for_status()\n            total = int(r.headers.get(\"\
-          content-length\", 0))\n            downloaded = 0\n            with open(zip_path,\
-          \ \"wb\") as f:\n                for chunk in r.iter_content(chunk_size=1\
-          \ << 20):\n                    f.write(chunk)\n                    downloaded\
-          \ += len(chunk)\n        print(f\"Downloaded {downloaded:,} bytes (expected\
-          \ {total:,})\")\n\n        if not zipfile.is_zipfile(zip_path):\n      \
-          \      preview = zip_path.read_bytes()[:200]\n            raise RuntimeError(f\"\
-          Downloaded file is not a zip. Preview: {preview}\")\n\n        # Extract\
-          \ to output path.\n        out_dir = pathlib.Path(dataset.path)\n      \
-          \  if out_dir.exists():\n            shutil.rmtree(out_dir)\n        out_dir.mkdir(parents=True)\n\
+          \ *\n\ndef load_data(\n    dataset_url: str,\n    dataset_yaml_url: str,\n\
+          \    dataset: dsl.Output[dsl.Dataset],\n) -> None:\n    \"\"\"Download a\
+          \ YOLOv8-format dataset zip from a URL and unpack it.\n\n    Some dataset\
+          \ zips (e.g. ultralytics/coco128.zip) do not bundle a\n    ``data.yaml``\
+          \ because it is included in the ultralytics Python package\n    instead.\
+          \  Supply ``dataset_yaml_url`` to fetch the yaml separately; it\n    will\
+          \ be written into the extracted dataset root so that YOLOv8 can find\n \
+          \   it.  Leave ``dataset_yaml_url`` empty if the zip already contains a\n\
+          \    ``data.yaml``.\n    \"\"\"\n    import pathlib\n    import shutil\n\
+          \    import tempfile\n    import zipfile\n\n    import requests\n    import\
+          \ yaml\n\n    # Download the zip.\n    with tempfile.TemporaryDirectory()\
+          \ as tmp:\n        zip_path = pathlib.Path(tmp) / \"dataset.zip\"\n    \
+          \    print(f\"Downloading {dataset_url} ...\")\n        with requests.get(dataset_url,\
+          \ stream=True, timeout=300) as r:\n            r.raise_for_status()\n  \
+          \          total = int(r.headers.get(\"content-length\", 0))\n         \
+          \   downloaded = 0\n            with open(zip_path, \"wb\") as f:\n    \
+          \            for chunk in r.iter_content(chunk_size=1 << 20):\n        \
+          \            f.write(chunk)\n                    downloaded += len(chunk)\n\
+          \        print(f\"Downloaded {downloaded:,} bytes (expected {total:,})\"\
+          )\n\n        if not zipfile.is_zipfile(zip_path):\n            preview =\
+          \ zip_path.read_bytes()[:200]\n            raise RuntimeError(f\"Downloaded\
+          \ file is not a zip. Preview: {preview}\")\n\n        # Extract to output\
+          \ path.\n        out_dir = pathlib.Path(dataset.path)\n        if out_dir.exists():\n\
+          \            shutil.rmtree(out_dir)\n        out_dir.mkdir(parents=True)\n\
           \        with zipfile.ZipFile(zip_path) as zf:\n            zf.extractall(out_dir)\n\
-          \        print(f\"Extracted to {out_dir}\")\n\n    # Find data.yaml and\
-          \ patch its 'path' to the absolute dataset root so\n    # that YOLOv8 can\
-          \ resolve train/val image paths regardless of where the\n    # zip was extracted.\n\
-          \    data_yamls = list(out_dir.rglob(\"data.yaml\"))\n    if not data_yamls:\n\
-          \        raise FileNotFoundError(\n            f\"data.yaml not found. Contents:\
-          \ {list(out_dir.rglob('*'))[:20]}\"\n        )\n    data_yaml_path = data_yamls[0]\n\
-          \    dataset_root = str(data_yaml_path.parent.resolve())\n\n    with open(data_yaml_path)\
-          \ as f:\n        cfg = yaml.safe_load(f)\n    cfg[\"path\"] = dataset_root\n\
-          \    with open(data_yaml_path, \"w\") as f:\n        yaml.dump(cfg, f, default_flow_style=False,\
-          \ allow_unicode=True)\n\n    print(f\"data.yaml patched: path={dataset_root}\"\
-          )\n    print(f\"Dataset ready at {out_dir}\")\n\n"
+          \        print(f\"Extracted to {out_dir}\")\n\n    # Locate or fetch data.yaml.\n\
+          \    data_yamls = list(out_dir.rglob(\"data.yaml\"))\n    if not data_yamls\
+          \ and dataset_yaml_url:\n        # Zip didn't include data.yaml \u2014 fetch\
+          \ it and place it at the dataset root.\n        # For nested zips (e.g.\
+          \ coco128/), place next to the images/ dir.\n        images_dirs = list(out_dir.rglob(\"\
+          images\"))\n        yaml_parent = images_dirs[0].parent if images_dirs else\
+          \ out_dir\n        dest_yaml = yaml_parent / \"data.yaml\"\n        print(f\"\
+          Fetching data.yaml from {dataset_yaml_url} \u2192 {dest_yaml}\")\n     \
+          \   resp = requests.get(dataset_yaml_url, timeout=30)\n        resp.raise_for_status()\n\
+          \        dest_yaml.write_bytes(resp.content)\n        data_yamls = [dest_yaml]\n\
+          \n    if not data_yamls:\n        raise FileNotFoundError(\n           \
+          \ f\"data.yaml not found in zip and dataset_yaml_url is empty. \"\n    \
+          \        f\"Contents: {list(out_dir.rglob('*'))[:20]}\"\n        )\n\n \
+          \   # Patch 'path' to the absolute dataset root so YOLOv8 can resolve\n\
+          \    # train/val image paths regardless of where the zip was extracted.\n\
+          \    data_yaml_path = data_yamls[0]\n    dataset_root = str(data_yaml_path.parent.resolve())\n\
+          \n    with open(data_yaml_path) as f:\n        cfg = yaml.safe_load(f)\n\
+          \    cfg[\"path\"] = dataset_root\n    with open(data_yaml_path, \"w\")\
+          \ as f:\n        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)\n\
+          \n    print(f\"data.yaml patched: path={dataset_root}\")\n    print(f\"\
+          Dataset ready at {out_dir}\")\n\n"
         image: python:3.11-slim
     exec-register:
       container:
@@ -331,6 +351,8 @@ root:
           parameters:
             dataset_url:
               componentInputParameter: dataset_url
+            dataset_yaml_url:
+              componentInputParameter: dataset_yaml_url
         taskInfo:
           name: load-data
       register:
@@ -387,6 +409,10 @@ root:
     parameters:
       dataset_url:
         defaultValue: https://ultralytics.com/assets/coco128.zip
+        isOptional: true
+        parameterType: STRING
+      dataset_yaml_url:
+        defaultValue: https://raw.githubusercontent.com/ultralytics/ultralytics/main/ultralytics/cfg/datasets/coco128.yaml
         isOptional: true
         parameterType: STRING
       epochs:

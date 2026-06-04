@@ -57,9 +57,18 @@ _PYTHON = "python:3.11-slim"
 )
 def load_data(
     dataset_url: str,
+    dataset_yaml_url: str,
     dataset: dsl.Output[dsl.Dataset],
 ) -> None:
-    """Download a YOLOv8-format dataset zip from a URL and unpack it."""
+    """Download a YOLOv8-format dataset zip from a URL and unpack it.
+
+    Some dataset zips (e.g. ultralytics/coco128.zip) do not bundle a
+    ``data.yaml`` because it is included in the ultralytics Python package
+    instead.  Supply ``dataset_yaml_url`` to fetch the yaml separately; it
+    will be written into the extracted dataset root so that YOLOv8 can find
+    it.  Leave ``dataset_yaml_url`` empty if the zip already contains a
+    ``data.yaml``.
+    """
     import pathlib
     import shutil
     import tempfile
@@ -95,14 +104,28 @@ def load_data(
             zf.extractall(out_dir)
         print(f"Extracted to {out_dir}")
 
-    # Find data.yaml and patch its 'path' to the absolute dataset root so
-    # that YOLOv8 can resolve train/val image paths regardless of where the
-    # zip was extracted.
+    # Locate or fetch data.yaml.
     data_yamls = list(out_dir.rglob("data.yaml"))
+    if not data_yamls and dataset_yaml_url:
+        # Zip didn't include data.yaml — fetch it and place it at the dataset root.
+        # For nested zips (e.g. coco128/), place next to the images/ dir.
+        images_dirs = list(out_dir.rglob("images"))
+        yaml_parent = images_dirs[0].parent if images_dirs else out_dir
+        dest_yaml = yaml_parent / "data.yaml"
+        print(f"Fetching data.yaml from {dataset_yaml_url} → {dest_yaml}")
+        resp = requests.get(dataset_yaml_url, timeout=30)
+        resp.raise_for_status()
+        dest_yaml.write_bytes(resp.content)
+        data_yamls = [dest_yaml]
+
     if not data_yamls:
         raise FileNotFoundError(
-            f"data.yaml not found. Contents: {list(out_dir.rglob('*'))[:20]}"
+            f"data.yaml not found in zip and dataset_yaml_url is empty. "
+            f"Contents: {list(out_dir.rglob('*'))[:20]}"
         )
+
+    # Patch 'path' to the absolute dataset root so YOLOv8 can resolve
+    # train/val image paths regardless of where the zip was extracted.
     data_yaml_path = data_yamls[0]
     dataset_root = str(data_yaml_path.parent.resolve())
 
@@ -270,6 +293,10 @@ def register(
 )
 def yolov8_pipeline(
     dataset_url: str = "https://ultralytics.com/assets/coco128.zip",
+    dataset_yaml_url: str = (
+        "https://raw.githubusercontent.com/ultralytics/ultralytics"
+        "/main/ultralytics/cfg/datasets/coco128.yaml"
+    ),
     model_variant: str = "yolov8n.pt",
     epochs: int = 10,
     imgsz: int = 640,
@@ -280,7 +307,7 @@ def yolov8_pipeline(
     # ------------------------------------------------------------------
     # load_data — CPU, downloads dataset from a URL
     # ------------------------------------------------------------------
-    load_task = load_data(dataset_url=dataset_url)
+    load_task = load_data(dataset_url=dataset_url, dataset_yaml_url=dataset_yaml_url)
     # GPU taint toleration needed for all steps: the system node is at capacity
     # so all pods must be able to land on the GPU node.
     kubernetes.add_toleration(
