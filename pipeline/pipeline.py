@@ -186,6 +186,7 @@ def train(
             project=model_dir.path,
             name="train",
             exist_ok=True,
+            workers=0,  # disable DataLoader multiprocessing (avoids /dev/shm exhaustion in K8s)
         )
         run_id = run.info.run_id
 

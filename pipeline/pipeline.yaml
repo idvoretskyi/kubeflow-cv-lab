@@ -292,8 +292,9 @@ deploymentSpec:
           \ as run:\n        model = YOLO(model_variant)\n        model.train(\n \
           \           data=data_yaml,\n            epochs=epochs,\n            imgsz=imgsz,\n\
           \            project=model_dir.path,\n            name=\"train\",\n    \
-          \        exist_ok=True,\n        )\n        run_id = run.info.run_id\n\n\
-          \    # Copy best.pt to the canonical model_dir root so downstream steps\
+          \        exist_ok=True,\n            workers=0,  # disable DataLoader multiprocessing\
+          \ (avoids /dev/shm exhaustion in K8s)\n        )\n        run_id = run.info.run_id\n\
+          \n    # Copy best.pt to the canonical model_dir root so downstream steps\
           \ find it.\n    best_candidates = glob.glob(\n        os.path.join(model_dir.path,\
           \ \"**\", \"best.pt\"), recursive=True\n    )\n    if best_candidates:\n\
           \        dest = os.path.join(model_dir.path, \"best.pt\")\n        if os.path.abspath(best_candidates[0])\
