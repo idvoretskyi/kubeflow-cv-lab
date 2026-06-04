@@ -1,6 +1,6 @@
 # PIPELINE DEFINITION
 # Name: gpu-smoke-test
-# Description: Runs nvidia-smi on the dedicated GPU pool to validate GPU scheduling.
+# Description: Runs nvidia-smi on a GPU node to validate GPU scheduling.
 components:
   comp-nvidia-smi:
     executorLabel: exec-nvidia-smi
@@ -18,7 +18,7 @@ deploymentSpec:
             resourceType: nvidia.com/gpu
             type: nvidia.com/gpu
 pipelineInfo:
-  description: Runs nvidia-smi on the dedicated GPU pool to validate GPU scheduling.
+  description: Runs nvidia-smi on a GPU node to validate GPU scheduling.
   name: gpu-smoke-test
 root:
   dag:
@@ -40,7 +40,7 @@ platforms:
         exec-nvidia-smi:
           nodeSelector:
             labels:
-              nodepool.lke/role: gpu
+              nvidia.com/gpu.present: 'true'
           tolerations:
           - effect: NoSchedule
             key: nvidia.com/gpu

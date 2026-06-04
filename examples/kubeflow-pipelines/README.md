@@ -13,15 +13,17 @@ convenience — upload straight to the Kubeflow dashboard without installing the
 
 ## Why the GPU pipeline needs extra config
 
-GPU nodes are tainted `nvidia.com/gpu=present:NoSchedule` so they stay reserved
-for GPU work. A GPU pipeline step must (see `gpu_pipeline.py`):
+GPU nodes are commonly tainted `nvidia.com/gpu=present:NoSchedule` so they
+stay reserved for GPU work. A GPU pipeline step must (see `gpu_pipeline.py`):
 
 1. request a GPU — `task.set_accelerator_type("nvidia.com/gpu")` + `set_accelerator_limit(1)`
-2. tolerate the taint — `kubernetes.add_toleration(task, key="nvidia.com/gpu", operator="Exists", effect="NoSchedule")`
-3. optionally pin to the pool — `kubernetes.add_node_selector(task, "nodepool.lke/role", "gpu")`
+2. tolerate the taint — `kubernetes.add_toleration(task, key="nvidia.com/gpu", operator="Exists", effect="NoSchedule")` (no-op if nodes are untainted)
+3. identify GPU nodes — `kubernetes.add_node_selector(task, "nvidia.com/gpu.present", "true")`
+   — the GPU Feature Discovery (GFD) label written by the NVIDIA GPU Operator
+   on every GPU node, regardless of cloud provider.
 
-CPU steps need none of this: without a toleration they simply cannot land on the
-GPU nodes, so they stay on the system pool automatically.
+CPU steps need none of this: without a toleration they cannot land on tainted
+GPU nodes, so they stay on non-GPU nodes automatically.
 
 ## Prerequisites
 

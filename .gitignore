@@ -27,6 +27,8 @@ secrets/*.yaml
 .env
 .env.local
 .env.*.local
+# Presets are cluster configuration (not secrets) and are tracked.
+!platform/presets/*.env
 
 # ML / data artifacts
 datasets/

@@ -5,8 +5,8 @@ this before making changes.
 
 ## What this project is
 
-An end-to-end computer-vision MLOps lab that runs on a GPU-enabled Kubeflow
-cluster (Kubeflow **26.03** on Linode/Akamai LKE). The loop is:
+An end-to-end computer-vision MLOps lab that runs on any GPU-enabled Kubeflow
+cluster (Kubeflow **26.03**). The loop is:
 
 > Roboflow Universe dataset → Kubeflow Pipeline (load → train YOLOv8 on GPU →
 > evaluate → register) → self-hosted MLflow (tracking + registry) → KServe
@@ -17,7 +17,8 @@ GPU-enabled Kubernetes cluster.
 
 The companion infrastructure repo is `akamai-lke-gpu-cluster`
 (GitHub: `idvoretskyi/linode-gpu-k8s`). That repo provisions the cluster and
-installs the NVIDIA GPU operator; it does **not** install Kubeflow.
+installs the NVIDIA GPU operator; it is the de-facto tested platform for this
+lab (Linode/Akamai LKE), but the lab itself is cloud-neutral.
 
 ## Repository layout
 
@@ -51,9 +52,10 @@ These reflect the verified Kubeflow **26.03** layout. Code must conform to them.
   --artifacts-destination s3://mlflow`). Training pods talk to MLflow over HTTP
   (`mlflow-artifacts:/`) and must not need direct S3 access or credentials.
 - **GPU scheduling contract** for any GPU step:
-  - request a GPU: `set_accelerator_type("nvidia.com/gpu")` + `set_accelerator_limit(1)`
-  - tolerate the taint: `kubernetes.add_toleration(task, key="nvidia.com/gpu", operator="Exists", effect="NoSchedule")`
-  - pin to the pool: `kubernetes.add_node_selector(task, "nodepool.lke/role", "gpu")`
+  - **Required:** request a GPU — `set_accelerator_type("nvidia.com/gpu")` + `set_accelerator_limit(1)`
+  - **Recommended:** tolerate the taint — `kubernetes.add_toleration(task, key="nvidia.com/gpu", operator="Exists", effect="NoSchedule")` (no-op if nodes are untainted)
+  - **GPU-node identification:** use the GPU Feature Discovery (GFD) label — `kubernetes.add_node_selector(task, "nvidia.com/gpu.present", "true")`. This label is written by the NVIDIA GPU Operator's GFD component on every GPU node on any cluster; it is vendor-neutral. The GPU resource request is the hard placement guarantee; the selector is an explicit filter. Override `GPU_NODE_SELECTOR_KEY`/`GPU_NODE_SELECTOR_VALUE` env vars to use a different label (e.g. `nodepool.lke/role=gpu` for strict LKE pool pinning), or set `GPU_NODE_SELECTOR_KEY=""` to omit the selector.
+  - **Do not hardcode cloud-specific pool labels** (like `nodepool.lke/role`) in committed pipeline code; use env vars or presets instead.
 - **Namespace:** the lab's own resources (MLflow, Postgres, KServe) live in
   `cv-lab`. Pipeline pods run in the `kubeflow` namespace.
 
@@ -64,18 +66,21 @@ These reflect the verified Kubeflow **26.03** layout. Code must conform to them.
 - The **GPU operator is an external prerequisite** — it must be running on the
   cluster before `platform/install.sh` is called. Never install the GPU operator
   from these scripts.
-- CIDR parameterization: `KF_APISERVER_CIDRS` and `KF_POD_CIDR` default to the
-  Linode/LKE values (`192.168.128.0/17`, `10.2.0.0/16`). Setting either to `""`
-  skips the NetworkPolicy patch. Document any new cloud-specific defaults in
-  `platform/config.env.example`.
+- `KF_WEBHOOK_ACCESS` defaults to `auto` (runtime detection of node IPs +
+  apiserver endpoints + podCIDRs). Other modes: `open`, `cidrs`, `skip`. No
+  cloud-specific CIDRs in built-in defaults.
+- `platform/presets/<name>.env` captures cloud-specific or cluster-specific
+  overrides (e.g. `platform/presets/lke.env` for Linode LKE). Presets are
+  the only place where cloud-vendor literals (CIDRs, pool labels) belong.
 - `platform/config.env` is git-ignored. Only `config.env.example` is committed.
 
 ## examples/ conventions
 
 - `examples/kubeflow-pipelines/` contains the hello-world and GPU smoke-test
   pipelines. Always commit the compiled `*.yaml` alongside any `*.py` changes.
-- These pipelines follow the **GPU scheduling contract** above (see
-  `gpu_pipeline.py`).
+- These pipelines follow the **GPU scheduling contract** above. The compiled
+  YAML must not contain cloud-specific labels; use env var overrides for
+  cluster-specific targeting.
 
 ## Conventions
 

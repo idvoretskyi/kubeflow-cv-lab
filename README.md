@@ -15,8 +15,9 @@ Kubeflow Pipelines, MLflow, and KServe into a single end-to-end loop:
 > KServe InferenceService → `supervision` visualization.**
 
 This repo also ships a **portable Kubeflow installer** (`platform/`) that works
-on any GPU-enabled Kubernetes cluster. Tested on Linode/Akamai LKE with Kubeflow
-**26.03**. The companion cluster-provisioning repo is
+on any conformant GPU-enabled Kubernetes cluster. Tested on Linode/Akamai LKE
+with Kubeflow **26.03**; an LKE preset (`platform/presets/lke.env`) is included
+for that path. The companion cluster-provisioning repo is
 [`akamai-lke-gpu-cluster`](https://github.com/idvoretskyi/linode-gpu-k8s).
 
 > **Status:** scaffolding. The cluster manifests, pipeline, serving image, and
@@ -66,9 +67,12 @@ The `platform/` directory contains a portable Kubeflow installer that works on
 any GPU-enabled Kubernetes cluster.
 
 ```bash
-# Optional: configure for your cloud (defaults are correct for LKE)
+# Optional: configure for your cluster (auto-detection works on most clusters)
 cp platform/config.env.example platform/config.env
 $EDITOR platform/config.env
+
+# For Linode/Akamai LKE, use the bundled preset instead:
+# PRESET=lke make platform-install
 
 # Install Kubeflow 26.03
 make platform-install
@@ -79,7 +83,7 @@ kubectl port-forward -n istio-system svc/istio-ingressgateway 8080:80
 ```
 
 See [`platform/README.md`](platform/README.md) for full documentation, including
-how to set the correct CIDRs for non-LKE clouds.
+webhook access modes and how to use or add presets.
 
 ## Deploy order (full lab)
 
@@ -136,9 +140,10 @@ See [`examples/kubeflow-pipelines/README.md`](examples/kubeflow-pipelines/README
 - **Cross-namespace access:** the lab adds one additive `NetworkPolicy` so the
   `cv-lab` namespace can reach SeaweedFS. This is the **only** modification made
   to the `kubeflow` namespace.
-- **GPU scheduling:** GPU nodes are tainted `nvidia.com/gpu=present:NoSchedule`
-  and labelled `nodepool.lke/role=gpu`. The training step adds the matching
-  toleration, node selector, and GPU resource request.
+- **GPU scheduling:** GPU nodes carry the `nvidia.com/gpu` taint. The training
+  step adds the matching toleration and identifies GPU nodes via the GPU Feature
+  Discovery (GFD) label `nvidia.com/gpu.present=true`, which the NVIDIA GPU
+  Operator sets on every GPU node regardless of cloud provider.
 
 ## Repository layout
 

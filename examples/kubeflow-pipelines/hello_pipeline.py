@@ -2,8 +2,8 @@
 
 A two-step "hello world" pipeline that verifies Pipelines is working end to end.
 Both steps run as ordinary pods; because they carry no toleration for the GPU
-node taint (nvidia.com/gpu=present:NoSchedule), the scheduler keeps them on the
-system pool, leaving the GPU nodes free for GPU work.
+node taint, the scheduler keeps them on non-GPU nodes, leaving GPU nodes free
+for GPU work.
 
 Compile:
     python hello_pipeline.py            # writes hello_pipeline.yaml
