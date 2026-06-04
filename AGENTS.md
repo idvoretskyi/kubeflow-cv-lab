@@ -8,7 +8,7 @@ this before making changes.
 An end-to-end computer-vision MLOps lab that runs on any GPU-enabled Kubeflow
 cluster (Kubeflow **26.03**). The loop is:
 
-> Roboflow Universe dataset → Kubeflow Pipeline (load → train YOLOv8 on GPU →
+> Dataset download → Kubeflow Pipeline (load → train YOLOv8 on GPU →
 > evaluate → register) → self-hosted MLflow (tracking + registry) → KServe
 > InferenceService → `supervision` visualization.
 
@@ -93,9 +93,11 @@ These reflect the verified Kubeflow **26.03** layout. Code must conform to them.
   the KServe serving image is built and pushed (to `ghcr.io/idvoretskyi/...`).
 - **MLflow image:** official `ghcr.io/mlflow/mlflow`; Postgres/boto3 drivers are
   `pip install`-ed at pod start (no custom MLflow image).
-- **Default dataset:** Roboflow Universe *Aquarium Combined*
-  (`roboflow-jvuqo/aquarium-combined`, YOLOv8 format), overridable via pipeline
-  parameters.
+- **Default dataset:** [COCO128](https://docs.ultralytics.com/datasets/detect/coco/)
+  (128-image COCO subset, YOLOv8 format), downloaded from
+  `ultralytics.com/assets/coco128.zip`. Overridable via the `dataset_url` pipeline
+  parameter. The `load_data` step accepts any publicly accessible YOLOv8-format
+  dataset zip URL.
 - **Secrets:** never commit credentials or API keys. Provide `*.example.yaml`
   templates only; real files match `secrets/*.yaml` and are git-ignored.
 

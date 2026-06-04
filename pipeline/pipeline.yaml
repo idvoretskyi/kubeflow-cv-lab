@@ -1,16 +1,14 @@
 # PIPELINE DEFINITION
-# Name: yolov8-aquarium-training
-# Description: Roboflow → YOLOv8 GPU training → MLflow tracking & registry → model URI for KServe serving.
+# Name: yolov8-training
+# Description: Dataset download → YOLOv8 GPU training → MLflow tracking & registry → model URI for KServe serving.
 # Inputs:
+#    dataset_url: str [Default: 'https://ultralytics.com/assets/coco128.zip']
 #    epochs: int [Default: 10.0]
-#    experiment_name: str [Default: 'aquarium-yolov8']
+#    experiment_name: str [Default: 'coco128-yolov8']
 #    imgsz: int [Default: 640.0]
 #    mlflow_tracking_uri: str [Default: 'http://mlflow.cv-lab:5000']
 #    model_variant: str [Default: 'yolov8n.pt']
-#    registered_model_name: str [Default: 'yolov8-aquarium']
-#    roboflow_project: str [Default: 'aquarium-combined']
-#    roboflow_version: int [Default: 6.0]
-#    roboflow_workspace: str [Default: 'roboflow-jvuqo']
+#    registered_model_name: str [Default: 'yolov8-coco128']
 components:
   comp-evaluate:
     executorLabel: exec-evaluate
@@ -37,11 +35,7 @@ components:
     executorLabel: exec-load-data
     inputDefinitions:
       parameters:
-        project:
-          parameterType: STRING
-        version:
-          parameterType: NUMBER_INTEGER
-        workspace:
+        dataset_url:
           parameterType: STRING
     outputDefinitions:
       artifacts:
@@ -150,7 +144,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'roboflow==1.1.66'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'requests' 'pyyaml'\
           \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
@@ -165,13 +159,35 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef load_data(\n    workspace: str,\n    project: str,\n    version:\
-          \ int,\n    dataset: dsl.Output[dsl.Dataset],\n) -> None:\n    \"\"\"Download\
-          \ a Roboflow Universe dataset in YOLOv8 format.\"\"\"\n    import os\n\n\
-          \    from roboflow import Roboflow\n\n    api_key = os.environ[\"ROBOFLOW_API_KEY\"\
-          ]\n    rf = Roboflow(api_key=api_key)\n    proj = rf.workspace(workspace).project(project)\n\
-          \    ver = proj.version(version)\n    dl = ver.download(\"yolov8\", location=dataset.path)\n\
-          \    print(f\"Dataset downloaded to: {dl.location}\")\n\n"
+          \ *\n\ndef load_data(\n    dataset_url: str,\n    dataset: dsl.Output[dsl.Dataset],\n\
+          ) -> None:\n    \"\"\"Download a YOLOv8-format dataset zip from a URL and\
+          \ unpack it.\"\"\"\n    import pathlib\n    import shutil\n    import tempfile\n\
+          \    import zipfile\n\n    import requests\n    import yaml\n\n    # Download\
+          \ the zip.\n    with tempfile.TemporaryDirectory() as tmp:\n        zip_path\
+          \ = pathlib.Path(tmp) / \"dataset.zip\"\n        print(f\"Downloading {dataset_url}\
+          \ ...\")\n        with requests.get(dataset_url, stream=True, timeout=300)\
+          \ as r:\n            r.raise_for_status()\n            total = int(r.headers.get(\"\
+          content-length\", 0))\n            downloaded = 0\n            with open(zip_path,\
+          \ \"wb\") as f:\n                for chunk in r.iter_content(chunk_size=1\
+          \ << 20):\n                    f.write(chunk)\n                    downloaded\
+          \ += len(chunk)\n        print(f\"Downloaded {downloaded:,} bytes (expected\
+          \ {total:,})\")\n\n        if not zipfile.is_zipfile(zip_path):\n      \
+          \      preview = zip_path.read_bytes()[:200]\n            raise RuntimeError(f\"\
+          Downloaded file is not a zip. Preview: {preview}\")\n\n        # Extract\
+          \ to output path.\n        out_dir = pathlib.Path(dataset.path)\n      \
+          \  if out_dir.exists():\n            shutil.rmtree(out_dir)\n        out_dir.mkdir(parents=True)\n\
+          \        with zipfile.ZipFile(zip_path) as zf:\n            zf.extractall(out_dir)\n\
+          \        print(f\"Extracted to {out_dir}\")\n\n    # Find data.yaml and\
+          \ patch its 'path' to the absolute dataset root so\n    # that YOLOv8 can\
+          \ resolve train/val image paths regardless of where the\n    # zip was extracted.\n\
+          \    data_yamls = list(out_dir.rglob(\"data.yaml\"))\n    if not data_yamls:\n\
+          \        raise FileNotFoundError(\n            f\"data.yaml not found. Contents:\
+          \ {list(out_dir.rglob('*'))[:20]}\"\n        )\n    data_yaml_path = data_yamls[0]\n\
+          \    dataset_root = str(data_yaml_path.parent.resolve())\n\n    with open(data_yaml_path)\
+          \ as f:\n        cfg = yaml.safe_load(f)\n    cfg[\"path\"] = dataset_root\n\
+          \    with open(data_yaml_path, \"w\") as f:\n        yaml.dump(cfg, f, default_flow_style=False,\
+          \ allow_unicode=True)\n\n    print(f\"data.yaml patched: path={dataset_root}\"\
+          )\n    print(f\"Dataset ready at {out_dir}\")\n\n"
         image: python:3.11-slim
     exec-register:
       container:
@@ -273,9 +289,9 @@ deploymentSpec:
             resourceType: nvidia.com/gpu
             type: nvidia.com/gpu
 pipelineInfo:
-  description: "Roboflow \u2192 YOLOv8 GPU training \u2192 MLflow tracking & registry\
-    \ \u2192 model URI for KServe serving."
-  name: yolov8-aquarium-training
+  description: "Dataset download \u2192 YOLOv8 GPU training \u2192 MLflow tracking\
+    \ & registry \u2192 model URI for KServe serving."
+  name: yolov8-training
 root:
   dag:
     tasks:
@@ -313,12 +329,8 @@ root:
           name: comp-load-data
         inputs:
           parameters:
-            project:
-              componentInputParameter: roboflow_project
-            version:
-              componentInputParameter: roboflow_version
-            workspace:
-              componentInputParameter: roboflow_workspace
+            dataset_url:
+              componentInputParameter: dataset_url
         taskInfo:
           name: load-data
       register:
@@ -373,12 +385,16 @@ root:
           name: train
   inputDefinitions:
     parameters:
+      dataset_url:
+        defaultValue: https://ultralytics.com/assets/coco128.zip
+        isOptional: true
+        parameterType: STRING
       epochs:
         defaultValue: 10.0
         isOptional: true
         parameterType: NUMBER_INTEGER
       experiment_name:
-        defaultValue: aquarium-yolov8
+        defaultValue: coco128-yolov8
         isOptional: true
         parameterType: STRING
       imgsz:
@@ -394,19 +410,7 @@ root:
         isOptional: true
         parameterType: STRING
       registered_model_name:
-        defaultValue: yolov8-aquarium
-        isOptional: true
-        parameterType: STRING
-      roboflow_project:
-        defaultValue: aquarium-combined
-        isOptional: true
-        parameterType: STRING
-      roboflow_version:
-        defaultValue: 6.0
-        isOptional: true
-        parameterType: NUMBER_INTEGER
-      roboflow_workspace:
-        defaultValue: roboflow-jvuqo
+        defaultValue: yolov8-coco128
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0
@@ -416,16 +420,21 @@ platforms:
   kubernetes:
     deploymentSpec:
       executors:
+        exec-evaluate:
+          tolerations:
+          - effect: NoSchedule
+            key: nvidia.com/gpu
+            operator: Exists
         exec-load-data:
-          secretAsEnv:
-          - keyToEnv:
-            - envVar: ROBOFLOW_API_KEY
-              secretKey: ROBOFLOW_API_KEY
-            optional: false
-            secretName: roboflow-api-key
-            secretNameParameter:
-              runtimeValue:
-                constant: roboflow-api-key
+          tolerations:
+          - effect: NoSchedule
+            key: nvidia.com/gpu
+            operator: Exists
+        exec-register:
+          tolerations:
+          - effect: NoSchedule
+            key: nvidia.com/gpu
+            operator: Exists
         exec-train:
           nodeSelector:
             labels:

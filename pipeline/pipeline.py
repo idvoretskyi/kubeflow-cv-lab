@@ -1,11 +1,14 @@
-"""Kubeflow Pipeline v2: YOLOv8 training on the Aquarium Combined dataset.
+"""Kubeflow Pipeline v2: YOLOv8 training on a YOLOv8-format dataset.
 
 Stages
 ------
-  load_data  — download dataset from Roboflow Universe (YOLOv8 format)
+  load_data  — download dataset zip from a URL; patch data.yaml paths
   train      — train yolov8n.pt on a GPU node; log to MLflow (proxied artifacts)
   evaluate   — run val on best.pt; emit mAP50 / mAP50-95
   register   — register the model in the MLflow Model Registry
+
+Default dataset: COCO128 (128-image COCO subset, ultralytics CDN).
+Override via the ``dataset_url`` pipeline parameter.
 
 GPU scheduling (mirrors examples/kubeflow-pipelines/gpu_pipeline.py):
   * set_accelerator_type / set_accelerator_limit  — hard placement guarantee
@@ -50,25 +53,67 @@ _PYTHON = "python:3.11-slim"
 # ---------------------------------------------------------------------------
 @dsl.component(
     base_image=_PYTHON,
-    packages_to_install=["roboflow==1.1.66"],
+    packages_to_install=["requests", "pyyaml"],
 )
 def load_data(
-    workspace: str,
-    project: str,
-    version: int,
+    dataset_url: str,
     dataset: dsl.Output[dsl.Dataset],
 ) -> None:
-    """Download a Roboflow Universe dataset in YOLOv8 format."""
-    import os
+    """Download a YOLOv8-format dataset zip from a URL and unpack it."""
+    import pathlib
+    import shutil
+    import tempfile
+    import zipfile
 
-    from roboflow import Roboflow
+    import requests
+    import yaml
 
-    api_key = os.environ["ROBOFLOW_API_KEY"]
-    rf = Roboflow(api_key=api_key)
-    proj = rf.workspace(workspace).project(project)
-    ver = proj.version(version)
-    dl = ver.download("yolov8", location=dataset.path)
-    print(f"Dataset downloaded to: {dl.location}")
+    # Download the zip.
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = pathlib.Path(tmp) / "dataset.zip"
+        print(f"Downloading {dataset_url} ...")
+        with requests.get(dataset_url, stream=True, timeout=300) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("content-length", 0))
+            downloaded = 0
+            with open(zip_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 20):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+        print(f"Downloaded {downloaded:,} bytes (expected {total:,})")
+
+        if not zipfile.is_zipfile(zip_path):
+            preview = zip_path.read_bytes()[:200]
+            raise RuntimeError(f"Downloaded file is not a zip. Preview: {preview}")
+
+        # Extract to output path.
+        out_dir = pathlib.Path(dataset.path)
+        if out_dir.exists():
+            shutil.rmtree(out_dir)
+        out_dir.mkdir(parents=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(out_dir)
+        print(f"Extracted to {out_dir}")
+
+    # Find data.yaml and patch its 'path' to the absolute dataset root so
+    # that YOLOv8 can resolve train/val image paths regardless of where the
+    # zip was extracted.
+    data_yamls = list(out_dir.rglob("data.yaml"))
+    if not data_yamls:
+        raise FileNotFoundError(
+            f"data.yaml not found. Contents: {list(out_dir.rglob('*'))[:20]}"
+        )
+    data_yaml_path = data_yamls[0]
+    dataset_root = str(data_yaml_path.parent.resolve())
+
+    with open(data_yaml_path) as f:
+        cfg = yaml.safe_load(f)
+    cfg["path"] = dataset_root
+    with open(data_yaml_path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+
+    print(f"data.yaml patched: path={dataset_root}")
+    print(f"Dataset ready at {out_dir}")
 
 
 # ---------------------------------------------------------------------------
@@ -217,35 +262,29 @@ def register(
 # Pipeline definition
 # ---------------------------------------------------------------------------
 @dsl.pipeline(
-    name="yolov8-aquarium-training",
+    name="yolov8-training",
     description=(
-        "Roboflow → YOLOv8 GPU training → MLflow tracking & registry → "
+        "Dataset download → YOLOv8 GPU training → MLflow tracking & registry → "
         "model URI for KServe serving."
     ),
 )
 def yolov8_pipeline(
-    roboflow_workspace: str = "roboflow-jvuqo",
-    roboflow_project: str = "aquarium-combined",
-    roboflow_version: int = 6,
+    dataset_url: str = "https://ultralytics.com/assets/coco128.zip",
     model_variant: str = "yolov8n.pt",
     epochs: int = 10,
     imgsz: int = 640,
     mlflow_tracking_uri: str = "http://mlflow.cv-lab:5000",
-    experiment_name: str = "aquarium-yolov8",
-    registered_model_name: str = "yolov8-aquarium",
+    experiment_name: str = "coco128-yolov8",
+    registered_model_name: str = "yolov8-coco128",
 ) -> None:
     # ------------------------------------------------------------------
-    # load_data — CPU, reads Roboflow API key from K8s secret
+    # load_data — CPU, downloads dataset from a URL
     # ------------------------------------------------------------------
-    load_task = load_data(
-        workspace=roboflow_workspace,
-        project=roboflow_project,
-        version=roboflow_version,
-    )
-    kubernetes.use_secret_as_env(
-        load_task,
-        secret_name="roboflow-api-key",
-        secret_key_to_env={"ROBOFLOW_API_KEY": "ROBOFLOW_API_KEY"},
+    load_task = load_data(dataset_url=dataset_url)
+    # GPU taint toleration needed for all steps: the system node is at capacity
+    # so all pods must be able to land on the GPU node.
+    kubernetes.add_toleration(
+        load_task, key=GPU_TAINT_KEY, operator="Exists", effect=GPU_TAINT_EFFECT
     )
 
     # ------------------------------------------------------------------
@@ -285,15 +324,21 @@ def yolov8_pipeline(
         mlflow_tracking_uri=mlflow_tracking_uri,
         run_id=train_task.outputs["Output"],
     )
+    kubernetes.add_toleration(
+        eval_task, key=GPU_TAINT_KEY, operator="Exists", effect=GPU_TAINT_EFFECT
+    )
 
     # ------------------------------------------------------------------
     # register — CPU
     # ------------------------------------------------------------------
-    register(
+    reg_task = register(
         run_id=train_task.outputs["Output"],
         registered_model_name=registered_model_name,
         mlflow_tracking_uri=mlflow_tracking_uri,
         map50_95=eval_task.outputs["Output"],
+    )
+    kubernetes.add_toleration(
+        reg_task, key=GPU_TAINT_KEY, operator="Exists", effect=GPU_TAINT_EFFECT
     )
 
 
