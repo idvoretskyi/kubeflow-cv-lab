@@ -1,15 +1,58 @@
 # deploy/
 
-Cluster manifests for the lab (kustomize). Added in **Phase 2**.
+Cluster manifests for the `cv-lab` lab namespace (kustomize).
 
-Planned contents:
+## Structure
 
-- `namespace.yaml` — the `cv-lab` namespace.
-- `cluster/` — the single additive `NetworkPolicy` allowing `cv-lab → seaweedfs:8333`
-  in the `kubeflow` namespace (the only change made to upstream Kubeflow).
-- `postgres/` — PostgreSQL backend store for MLflow (Deployment, Service, PVC,
-  example Secret).
-- `mlflow/` — MLflow tracking server (`--serve-artifacts`, artifacts on SeaweedFS
-  S3 `s3://mlflow`, backend on Postgres).
+```
+deploy/
+├── profile.yaml                        # Kubeflow Profile CR → creates cv-lab namespace
+├── cluster/
+│   └── networkpolicy-seaweedfs.yaml    # Only change to the kubeflow namespace: allow cv-lab → seaweedfs:8333
+├── postgres/
+│   ├── pvc.yaml                        # 10 Gi PVC (linode-block-storage-retain)
+│   ├── deployment.yaml                 # postgres:16-alpine
+│   ├── service.yaml
+│   └── secret.example.yaml            # Copy to secret.yaml and fill in passwords
+├── mlflow/
+│   ├── deployment.yaml                 # ghcr.io/mlflow/mlflow, --serve-artifacts, s3://mlflow backend
+│   ├── service.yaml
+│   └── create-bucket-job.yaml         # One-shot Job: creates the mlflow S3 bucket
+└── kustomization.yaml
+```
 
-Apply with `kubectl apply -k deploy/`.
+## Quick-start
+
+```bash
+# 1. Create the Profile (namespace + RBAC)
+kubectl apply -f deploy/profile.yaml
+
+# 2. Apply real secrets (not committed — copy from examples)
+cp secrets/seaweedfs-s3-credentials.example.yaml secrets/seaweedfs-s3-credentials.yaml
+cp deploy/postgres/secret.example.yaml deploy/postgres/secret.yaml
+# edit both files with real values, then:
+kubectl apply -f secrets/seaweedfs-s3-credentials.yaml
+kubectl apply -f secrets/roboflow-api-key.yaml   # your real key
+kubectl apply -f deploy/postgres/secret.yaml
+
+# 3. Apply remaining manifests
+kubectl apply -k deploy/
+
+# 4. Create the mlflow S3 bucket (once)
+kubectl apply -f deploy/mlflow/create-bucket-job.yaml
+kubectl wait --for=condition=complete job/mlflow-create-bucket -n cv-lab --timeout=120s
+
+# 5. Verify
+kubectl rollout status deployment/postgres -n cv-lab
+kubectl rollout status deployment/mlflow -n cv-lab
+kubectl port-forward svc/mlflow 5000:5000 -n cv-lab
+# open http://localhost:5000
+```
+
+## Notes
+
+- Postgres and MLflow pods have `sidecar.istio.io/inject: "false"` — they sit
+  outside the Istio mesh so mTLS complexity is avoided.
+- The `seaweedfs-s3-credentials` Secret is namespace-scoped to `cv-lab`; it is
+  never read cross-namespace.
+- `deploy/postgres/secret.yaml` and `secrets/*.yaml` are git-ignored.

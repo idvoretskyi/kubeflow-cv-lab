@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: cv-lab
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+      annotations:
+        # Keep Postgres outside the Istio mesh to avoid mTLS complexity.
+        sidecar.istio.io/inject: "false"
+    spec:
+      tolerations:
+        # Allow scheduling on GPU nodes (the system pool is undersized;
+        # GPU node has ample RAM and this pod requests no GPU resource).
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, mlflow]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-pvc

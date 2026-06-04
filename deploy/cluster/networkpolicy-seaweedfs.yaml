@@ -1,0 +1,21 @@
+# Allow cv-lab namespace pods to reach SeaweedFS S3 on port 8333.
+# This is the only additive change made to the upstream Kubeflow namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cv-lab-to-seaweedfs
+  namespace: kubeflow
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: seaweedfs
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cv-lab
+      ports:
+        - port: 8333
+          protocol: TCP

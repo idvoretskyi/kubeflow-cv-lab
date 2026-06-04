@@ -1,0 +1,81 @@
+# One-shot Job that creates the `mlflow` bucket in SeaweedFS S3.
+# Safe to re-run — exits 0 if the bucket already exists.
+# Apply once after the Profile + secrets are in place:
+#   kubectl apply -f deploy/mlflow/create-bucket-job.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlflow-create-bucket-script
+  namespace: cv-lab
+data:
+  create_bucket.py: |
+    import boto3
+    import botocore
+    import os
+    import sys
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=os.environ["MLFLOW_S3_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        region_name="us-east-1",
+        config=botocore.config.Config(s3={"addressing_style": "path"}),
+    )
+    bucket = "mlflow"
+    try:
+        s3.head_bucket(Bucket=bucket)
+        print(f"Bucket {bucket!r} already exists — nothing to do.")
+    except botocore.exceptions.ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code in ("404", "NoSuchBucket", "403"):
+            s3.create_bucket(Bucket=bucket)
+            print(f"Bucket {bucket!r} created.")
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mlflow-create-bucket
+  namespace: cv-lab
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      restartPolicy: OnFailure
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: create-bucket
+          image: python:3.11-slim
+          command:
+            - bash
+            - -c
+            - "pip install --quiet boto3 botocore && python3 /scripts/create_bucket.py"
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: http://seaweedfs.kubeflow:8333
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: mlflow-create-bucket-script

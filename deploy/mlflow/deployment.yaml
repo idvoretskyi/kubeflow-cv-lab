@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: cv-lab
+  labels:
+    app: mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+      annotations:
+        # Keep MLflow outside the Istio mesh to avoid mTLS complexity.
+        sidecar.istio.io/inject: "false"
+    spec:
+      tolerations:
+        # Allow scheduling on GPU nodes (the system pool is undersized;
+        # GPU node has ample RAM and this pod requests no GPU resource).
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: mlflow
+          image: ghcr.io/mlflow/mlflow:v2.22.0
+          command:
+            - bash
+            - -c
+            - |
+              pip install --quiet psycopg2-binary boto3 && \
+              mlflow server \
+                --host 0.0.0.0 \
+                --port 5000 \
+                --backend-store-uri postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB) \
+                --serve-artifacts \
+                --artifacts-destination s3://mlflow
+          ports:
+            - containerPort: 5000
+          env:
+            # Postgres connection info from shared secret
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_DB
+            # SeaweedFS S3 for artifact storage
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: http://seaweedfs.kubeflow:8333
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: MLFLOW_S3_IGNORE_TLS
+              value: "true"
+            # Force path-style S3 (required for SeaweedFS)
+            - name: MLFLOW_S3_ADDRESSING_STYLE
+              value: path
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
