@@ -4,7 +4,7 @@ Cluster manifests for the `cv-lab` lab namespace (kustomize).
 
 ## Structure
 
-```
+```text
 deploy/
 ├── profile.yaml                        # Kubeflow Profile CR → creates cv-lab namespace
 ├── cluster/
