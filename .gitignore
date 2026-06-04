@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Kubeconfig files
+kubeconfig*.yaml
+*.kubeconfig
+.kube/
+
+# Secrets — never commit real credentials. Only *.example.yaml is tracked.
+secrets/*.yaml
+!secrets/*.example.yaml
+*.env
+.env
+.env.local
+.env.*.local
+
+# ML / data artifacts
+datasets/
+runs/
+*.pt
+*.onnx
+mlruns/
+mlartifacts/
+
+# AI Tools and Generated Files
+.cursor/
+.cursorignore
+.cursorrules
+.github/copilot-instructions.md
+.claude/
+CLAUDE.md
+CLAUDE_HISTORY.md
+.claude-code/
+.continue/
+.aider*
+.cody/
+.windsurf/
+.ai/
+ai-context/
+.llm/
+
+# IDE and Editor files
+.vscode/
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Temporary / build
+tmp/
+temp/
+*.tmp
+*.bak
+dist/
+build/
+coverage/
+.coverage
+htmlcov/

@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    name: Python lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        run: ruff check .
+
+  yamllint:
+    name: YAML lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run yamllint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          config_file: .yamllint.yaml
+
+  kubeconform:
+    name: Manifest validation (kubeconform)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate manifests
+        run: |
+          if ! ls deploy/**/*.yaml serving/*.yaml >/dev/null 2>&1; then
+            echo "No manifests to validate yet (added in a later phase)."
+            exit 0
+          fi
+          curl -sSLf \
+            https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar -xz kubeconform
+          # CRDs (KServe, etc.) are resolved from the community schema repo; missing
+          # schemas are skipped rather than failing the build.
+          find deploy serving -name '*.yaml' -not -name '*.example.yaml' -print0 \
+            | xargs -0 ./kubeconform -strict -ignore-missing-schemas \
+                -schema-location default \
+                -schema-location \
+                'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+
+  kfp-compile:
+    name: KFP compile drift check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Compile pipeline and check for drift
+        run: |
+          if [ ! -f pipeline/pipeline.py ]; then
+            echo "pipeline/pipeline.py not present yet (added in a later phase)."
+            exit 0
+          fi
+          pip install -r pipeline/requirements.txt
+          python pipeline/pipeline.py
+          if ! git diff --exit-code -- pipeline/pipeline.yaml; then
+            echo "::error::pipeline.yaml is out of date. Run 'make compile' and commit the result."
+            exit 1
+          fi
+
+  markdownlint:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v23
+        with:
+          globs: |
+            **/*.md
