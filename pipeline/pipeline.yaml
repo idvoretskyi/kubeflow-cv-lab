@@ -1,0 +1,436 @@
+# PIPELINE DEFINITION
+# Name: yolov8-aquarium-training
+# Description: Roboflow → YOLOv8 GPU training → MLflow tracking & registry → model URI for KServe serving.
+# Inputs:
+#    epochs: int [Default: 10.0]
+#    experiment_name: str [Default: 'aquarium-yolov8']
+#    imgsz: int [Default: 640.0]
+#    mlflow_tracking_uri: str [Default: 'http://mlflow.cv-lab:5000']
+#    model_variant: str [Default: 'yolov8n.pt']
+#    registered_model_name: str [Default: 'yolov8-aquarium']
+#    roboflow_project: str [Default: 'aquarium-combined']
+#    roboflow_version: int [Default: 6.0]
+#    roboflow_workspace: str [Default: 'roboflow-jvuqo']
+components:
+  comp-evaluate:
+    executorLabel: exec-evaluate
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        model_dir:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        mlflow_tracking_uri:
+          parameterType: STRING
+        run_id:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-load-data:
+    executorLabel: exec-load-data
+    inputDefinitions:
+      parameters:
+        project:
+          parameterType: STRING
+        version:
+          parameterType: NUMBER_INTEGER
+        workspace:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-register:
+    executorLabel: exec-register
+    inputDefinitions:
+      parameters:
+        map50_95:
+          parameterType: NUMBER_DOUBLE
+        mlflow_tracking_uri:
+          parameterType: STRING
+        registered_model_name:
+          parameterType: STRING
+        run_id:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-train:
+    executorLabel: exec-train
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        epochs:
+          parameterType: NUMBER_INTEGER
+        experiment_name:
+          parameterType: STRING
+        imgsz:
+          parameterType: NUMBER_INTEGER
+        mlflow_tracking_uri:
+          parameterType: STRING
+        model_variant:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        model_dir:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-evaluate:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow>=2.10'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate(\n    dataset: dsl.Input[dsl.Dataset],\n    model_dir:\
+          \ dsl.Input[dsl.Model],\n    mlflow_tracking_uri: str,\n    run_id: str,\n\
+          ) -> float:\n    \"\"\"Run validation; log mAP50-95 to the existing MLflow\
+          \ run; return it.\"\"\"\n    import glob\n    import os\n\n    import mlflow\n\
+          \    from ultralytics import YOLO\n\n    mlflow.set_tracking_uri(mlflow_tracking_uri)\n\
+          \n    data_yamls = glob.glob(os.path.join(dataset.path, \"**\", \"data.yaml\"\
+          ), recursive=True)\n    data_yaml = data_yamls[0]\n\n    best_pt = os.path.join(model_dir.path,\
+          \ \"best.pt\")\n    if not os.path.exists(best_pt):\n        candidates\
+          \ = glob.glob(\n            os.path.join(model_dir.path, \"**\", \"best.pt\"\
+          ), recursive=True\n        )\n        best_pt = candidates[0] if candidates\
+          \ else best_pt\n\n    model = YOLO(best_pt)\n    results = model.val(data=data_yaml)\n\
+          \    map50_95 = float(results.box.map)\n    map50 = float(results.box.map50)\n\
+          \    print(f\"mAP50: {map50:.4f}  mAP50-95: {map50_95:.4f}\")\n\n    with\
+          \ mlflow.start_run(run_id=run_id):\n        mlflow.log_metrics({\"val/mAP50\"\
+          : map50, \"val/mAP50-95\": map50_95})\n\n    return map50_95\n\n"
+        image: ultralytics/ultralytics:latest
+    exec-load-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - load_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'roboflow==1.1.66'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef load_data(\n    workspace: str,\n    project: str,\n    version:\
+          \ int,\n    dataset: dsl.Output[dsl.Dataset],\n) -> None:\n    \"\"\"Download\
+          \ a Roboflow Universe dataset in YOLOv8 format.\"\"\"\n    import os\n\n\
+          \    from roboflow import Roboflow\n\n    api_key = os.environ[\"ROBOFLOW_API_KEY\"\
+          ]\n    rf = Roboflow(api_key=api_key)\n    proj = rf.workspace(workspace).project(project)\n\
+          \    ver = proj.version(version)\n    dl = ver.download(\"yolov8\", location=dataset.path)\n\
+          \    print(f\"Dataset downloaded to: {dl.location}\")\n\n"
+        image: python:3.11-slim
+    exec-register:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - register
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow>=2.10'\
+          \ 'boto3'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.16.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef register(\n    run_id: str,\n    registered_model_name: str,\n\
+          \    mlflow_tracking_uri: str,\n    map50_95: float,\n) -> str:\n    \"\"\
+          \"Register the trained model in the MLflow Model Registry.\"\"\"\n    import\
+          \ mlflow\n    from mlflow import MlflowClient\n\n    mlflow.set_tracking_uri(mlflow_tracking_uri)\n\
+          \    client = MlflowClient()\n\n    model_uri = f\"runs:/{run_id}/weights\"\
+          \n    mv = mlflow.register_model(model_uri, registered_model_name)\n   \
+          \ print(f\"Registered: {registered_model_name} v{mv.version}  (run {run_id})\"\
+          )\n    print(f\"mAP50-95: {map50_95:.4f}\")\n\n    client.set_model_version_tag(\n\
+          \        registered_model_name, str(mv.version), \"mAP50-95\", f\"{map50_95:.4f}\"\
+          \n    )\n\n    return f\"models:/{registered_model_name}/{mv.version}\"\n\
+          \n"
+        image: python:3.11-slim
+    exec-train:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow>=2.10'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train(\n    dataset: dsl.Input[dsl.Dataset],\n    model_variant:\
+          \ str,\n    epochs: int,\n    imgsz: int,\n    mlflow_tracking_uri: str,\n\
+          \    experiment_name: str,\n    model_dir: dsl.Output[dsl.Model],\n) ->\
+          \ str:\n    \"\"\"Train YOLOv8 on the dataset; log to MLflow; return the\
+          \ MLflow run ID.\"\"\"\n    import glob\n    import os\n    import shutil\n\
+          \n    import mlflow\n    from ultralytics import YOLO, settings\n\n    #\
+          \ Point Ultralytics' built-in MLflow callback at our self-hosted server.\n\
+          \    mlflow.set_tracking_uri(mlflow_tracking_uri)\n    mlflow.set_experiment(experiment_name)\n\
+          \n    # Enable Ultralytics \u2192 MLflow integration.\n    settings.update({\"\
+          mlflow\": True})\n\n    # Locate the data.yaml inside the downloaded dataset.\n\
+          \    data_yamls = glob.glob(os.path.join(dataset.path, \"**\", \"data.yaml\"\
+          ), recursive=True)\n    if not data_yamls:\n        raise FileNotFoundError(f\"\
+          No data.yaml found under {dataset.path}\")\n    data_yaml = data_yamls[0]\n\
+          \    print(f\"Using data config: {data_yaml}\")\n\n    with mlflow.start_run()\
+          \ as run:\n        model = YOLO(model_variant)\n        model.train(\n \
+          \           data=data_yaml,\n            epochs=epochs,\n            imgsz=imgsz,\n\
+          \            project=model_dir.path,\n            name=\"train\",\n    \
+          \        exist_ok=True,\n        )\n        run_id = run.info.run_id\n\n\
+          \    # Copy best.pt to the canonical model_dir root so downstream steps\
+          \ find it.\n    best_candidates = glob.glob(\n        os.path.join(model_dir.path,\
+          \ \"**\", \"best.pt\"), recursive=True\n    )\n    if best_candidates:\n\
+          \        dest = os.path.join(model_dir.path, \"best.pt\")\n        if os.path.abspath(best_candidates[0])\
+          \ != os.path.abspath(dest):\n            shutil.copy(best_candidates[0],\
+          \ dest)\n        print(f\"best.pt \u2192 {dest}\")\n    else:\n        print(\"\
+          WARNING: best.pt not found in train output\")\n\n    print(f\"MLflow run_id:\
+          \ {run_id}\")\n    return run_id\n\n"
+        image: ultralytics/ultralytics:latest
+        resources:
+          accelerator:
+            count: '1'
+            resourceCount: '1'
+            resourceType: nvidia.com/gpu
+            type: nvidia.com/gpu
+pipelineInfo:
+  description: "Roboflow \u2192 YOLOv8 GPU training \u2192 MLflow tracking & registry\
+    \ \u2192 model URI for KServe serving."
+  name: yolov8-aquarium-training
+root:
+  dag:
+    tasks:
+      evaluate:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate
+        dependentTasks:
+        - load-data
+        - train
+        inputs:
+          artifacts:
+            dataset:
+              taskOutputArtifact:
+                outputArtifactKey: dataset
+                producerTask: load-data
+            model_dir:
+              taskOutputArtifact:
+                outputArtifactKey: model_dir
+                producerTask: train
+          parameters:
+            mlflow_tracking_uri:
+              componentInputParameter: mlflow_tracking_uri
+            run_id:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: train
+        taskInfo:
+          name: evaluate
+      load-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-load-data
+        inputs:
+          parameters:
+            project:
+              componentInputParameter: roboflow_project
+            version:
+              componentInputParameter: roboflow_version
+            workspace:
+              componentInputParameter: roboflow_workspace
+        taskInfo:
+          name: load-data
+      register:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-register
+        dependentTasks:
+        - evaluate
+        - train
+        inputs:
+          parameters:
+            map50_95:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: evaluate
+            mlflow_tracking_uri:
+              componentInputParameter: mlflow_tracking_uri
+            registered_model_name:
+              componentInputParameter: registered_model_name
+            run_id:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: train
+        taskInfo:
+          name: register
+      train:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train
+        dependentTasks:
+        - load-data
+        inputs:
+          artifacts:
+            dataset:
+              taskOutputArtifact:
+                outputArtifactKey: dataset
+                producerTask: load-data
+          parameters:
+            epochs:
+              componentInputParameter: epochs
+            experiment_name:
+              componentInputParameter: experiment_name
+            imgsz:
+              componentInputParameter: imgsz
+            mlflow_tracking_uri:
+              componentInputParameter: mlflow_tracking_uri
+            model_variant:
+              componentInputParameter: model_variant
+        taskInfo:
+          name: train
+  inputDefinitions:
+    parameters:
+      epochs:
+        defaultValue: 10.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      experiment_name:
+        defaultValue: aquarium-yolov8
+        isOptional: true
+        parameterType: STRING
+      imgsz:
+        defaultValue: 640.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      mlflow_tracking_uri:
+        defaultValue: http://mlflow.cv-lab:5000
+        isOptional: true
+        parameterType: STRING
+      model_variant:
+        defaultValue: yolov8n.pt
+        isOptional: true
+        parameterType: STRING
+      registered_model_name:
+        defaultValue: yolov8-aquarium
+        isOptional: true
+        parameterType: STRING
+      roboflow_project:
+        defaultValue: aquarium-combined
+        isOptional: true
+        parameterType: STRING
+      roboflow_version:
+        defaultValue: 6.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      roboflow_workspace:
+        defaultValue: roboflow-jvuqo
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.16.1
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-load-data:
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: ROBOFLOW_API_KEY
+              secretKey: ROBOFLOW_API_KEY
+            optional: false
+            secretName: roboflow-api-key
+            secretNameParameter:
+              runtimeValue:
+                constant: roboflow-api-key
+        exec-train:
+          nodeSelector:
+            labels:
+              nvidia.com/gpu.present: 'true'
+          tolerations:
+          - effect: NoSchedule
+            key: nvidia.com/gpu
+            operator: Exists
