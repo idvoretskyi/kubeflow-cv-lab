@@ -1,2 +1,2 @@
-kfp>=2.0
+kfp>=2.16.1
 kfp-kubernetes>=1.0
