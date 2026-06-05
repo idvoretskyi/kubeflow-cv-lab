@@ -144,7 +144,7 @@ def load_data(
 # ---------------------------------------------------------------------------
 @dsl.component(
     base_image=_ULTRALYTICS,
-    packages_to_install=["mlflow==2.22.0"],
+    packages_to_install=["mlflow==3.11.1"],
 )
 def train(
     dataset: dsl.Input[dsl.Dataset],
@@ -211,7 +211,7 @@ def train(
 # ---------------------------------------------------------------------------
 @dsl.component(
     base_image=_ULTRALYTICS,
-    packages_to_install=["mlflow==2.22.0"],
+    packages_to_install=["mlflow==3.11.1"],
 )
 def evaluate(
     dataset: dsl.Input[dsl.Dataset],
@@ -255,7 +255,7 @@ def evaluate(
 # ---------------------------------------------------------------------------
 @dsl.component(
     base_image=_PYTHON,
-    packages_to_install=["mlflow==2.22.0", "boto3"],
+    packages_to_install=["mlflow==3.11.1", "boto3"],
 )
 def register(
     run_id: str,

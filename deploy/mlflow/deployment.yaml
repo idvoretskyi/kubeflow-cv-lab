@@ -7,6 +7,8 @@ metadata:
     app: mlflow
 spec:
   replicas: 1
+  strategy:
+    type: Recreate   # GPU node is resource-constrained; old pod must exit before new one schedules
   selector:
     matchLabels:
       app: mlflow
@@ -24,9 +26,37 @@ spec:
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
+      initContainers:
+        # Run Alembic schema migration before the server starts.
+        # Idempotent: no-op when the schema is already at head.
+        - name: mlflow-db-upgrade
+          image: ghcr.io/mlflow/mlflow:v3.11.1
+          command:
+            - bash
+            - -c
+            - |
+              pip install --quiet psycopg2-binary && \
+              mlflow db upgrade \
+                postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_DB
       containers:
         - name: mlflow
-          image: ghcr.io/mlflow/mlflow:v2.22.0
+          image: ghcr.io/mlflow/mlflow:v3.11.1
           command:
             - bash
             - -c
@@ -35,6 +65,7 @@ spec:
               mlflow server \
                 --host 0.0.0.0 \
                 --port 5000 \
+                --allowed-hosts "*" \
                 --backend-store-uri postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB) \
                 --serve-artifacts \
                 --artifacts-destination s3://mlflow
@@ -82,7 +113,7 @@ spec:
               cpu: 200m
               memory: 512Mi
             limits:
-              memory: 1Gi
+              memory: 2Gi
           readinessProbe:
             httpGet:
               path: /health
