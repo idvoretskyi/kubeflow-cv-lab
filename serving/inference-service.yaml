@@ -1,0 +1,36 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: yolov8-coco128
+  namespace: cv-lab
+  annotations:
+    sidecar.istio.io/inject: "true"
+spec:
+  predictor:
+    # Tolerate the nvidia.com/gpu taint so the pod can land on the GPU node.
+    # The system node is at capacity; this toleration is required even though
+    # the predictor runs CPU-only inference.
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    containers:
+      - name: kserve-container
+        image: ghcr.io/idvoretskyi/kubeflow-cv-lab-serving:latest
+        env:
+          - name: MODEL_NAME
+            value: "yolov8-coco128"
+          - name: MODEL_URI
+            value: "models:/yolov8-coco128/1"
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow.cv-lab:5000"
+        ports:
+          - containerPort: 8080
+            protocol: TCP
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2"
+            memory: "3Gi"

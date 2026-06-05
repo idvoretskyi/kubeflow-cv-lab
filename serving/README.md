@@ -1,13 +1,34 @@
 # serving/
 
-KServe serving manifests. Added in **Phase 4**.
+KServe `InferenceService` manifests for the trained YOLOv8 model.
 
-Planned contents:
+Apply with:
 
-- `s3-serviceaccount.yaml` — `ServiceAccount` + S3 `Secret` annotated for KServe
-  (endpoint `seaweedfs.kubeflow:8333`, path-style, using the lab's own
-  `seaweedfs-s3-credentials` Secret).
-- `inferenceservice.yaml` — custom predictor loading the registered YOLO model
-  from `s3://mlflow/.../weights`.
+```bash
+make serve
+# or
+kubectl apply -k serving/
+```
 
-Apply with `kubectl apply -f serving/` once a model has been registered.
+## Files
+
+| File | Purpose |
+|---|---|
+| `inference-service.yaml` | `InferenceService` in `cv-lab` — custom predictor loading from MLflow |
+| `kustomization.yaml` | kustomize entry point |
+
+## Model source
+
+The predictor fetches model weights from the MLflow Model Registry at pod
+startup via `mlflow.artifacts.download_artifacts("models:/yolov8-coco128/1")`.
+MLflow proxies the artifact download over HTTP — the pod does **not** need
+direct S3 credentials.
+
+## Inference protocol
+
+KServe V1 prediction protocol:
+
+```
+POST /v1/models/yolov8-coco128:predict
+{"instances": [{"image": {"b64": "<base64 PNG/JPEG>"}}]}
+```

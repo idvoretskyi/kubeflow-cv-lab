@@ -20,10 +20,10 @@ PIP  := $(VENV)/bin/pip
 NAMESPACE ?= cv-lab
 PRESET    ?=
 
-.PHONY: platform-install platform-uninstall venv compile examples-compile lint deploy clean help
+.PHONY: platform-install platform-uninstall venv compile examples-compile lint deploy serve clean help
 
 help:
-	@echo "Targets: platform-install platform-uninstall venv compile examples-compile lint deploy clean"
+	@echo "Targets: platform-install platform-uninstall venv compile examples-compile lint deploy serve clean"
 
 # ---------------------------------------------------------------------------
 # Platform (Kubeflow install / uninstall)
@@ -72,6 +72,9 @@ lint:
 
 deploy:
 	kubectl apply -k deploy/
+
+serve:
+	kubectl apply -k serving/
 
 clean:
 	rm -rf $(VENV) pipeline/pipeline.yaml

@@ -1,0 +1,7 @@
+# Ultralytics YOLO (CPU-only torch is installed separately in the Dockerfile)
+ultralytics>=8.0
+# KServe Python SDK — must be compatible with the cluster's KServe version (v0.16)
+kserve>=0.13,<0.17
+# MLflow client — pinned to match the self-hosted server (2.22.0)
+mlflow==2.22.0
+Pillow>=10.0
