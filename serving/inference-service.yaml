@@ -25,7 +25,7 @@ spec:
           - name: MODEL_NAME
             value: "yolov8-coco128"
           - name: MODEL_URI
-            value: "models:/yolov8-coco128/1"
+            value: "models:/yolov8-coco128/2"
           - name: MLFLOW_TRACKING_URI
             value: "http://mlflow.cv-lab:5000"
         ports:
