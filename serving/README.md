@@ -28,7 +28,7 @@ direct S3 credentials.
 
 KServe V1 prediction protocol:
 
-```
+```text
 POST /v1/models/yolov8-coco128:predict
 {"instances": [{"image": {"b64": "<base64 PNG/JPEG>"}}]}
 ```
