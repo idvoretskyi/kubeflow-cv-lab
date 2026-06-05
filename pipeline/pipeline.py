@@ -270,8 +270,32 @@ def register(
     mlflow.set_tracking_uri(mlflow_tracking_uri)
     client = MlflowClient()
 
-    model_uri = f"runs:/{run_id}/weights"
-    mv = mlflow.register_model(model_uri, registered_model_name)
+    # MLflow 3.x removed the LoggedModel lookup from mlflow.register_model()
+    # for runs:/ URIs unless mlflow.log_model() was used during training.
+    # Use MlflowClient.create_model_version() directly with the artifact URI
+    # so that any artifact logged via mlflow.log_artifacts() can be registered.
+    run = client.get_run(run_id)
+    artifact_uri = f"{run.info.artifact_uri}/weights"
+
+    try:
+        client.create_registered_model(registered_model_name)
+    except mlflow.exceptions.MlflowException:
+        pass  # model already exists — create a new version below
+
+    mv = client.create_model_version(
+        name=registered_model_name,
+        source=artifact_uri,
+        run_id=run_id,
+    )
+
+    # Wait for the version to become READY
+    import time
+    for _ in range(30):
+        mv = client.get_model_version(registered_model_name, mv.version)
+        if mv.status == "READY":
+            break
+        time.sleep(2)
+
     print(f"Registered: {registered_model_name} v{mv.version}  (run {run_id})")
     print(f"mAP50-95: {map50_95:.4f}")
 
