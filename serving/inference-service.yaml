@@ -20,6 +20,7 @@ spec:
     containers:
       - name: kserve-container
         image: ghcr.io/idvoretskyi/kubeflow-cv-lab-serving:latest
+        imagePullPolicy: Always
         env:
           - name: MODEL_NAME
             value: "yolov8-coco128"
