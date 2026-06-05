@@ -7,10 +7,10 @@
 [![Ultralytics YOLO](https://img.shields.io/badge/Ultralytics-YOLOv8-111F68)](https://docs.ultralytics.com)
 
 A hands-on, newcomer-friendly **computer-vision MLOps lab** that runs on a
-GPU-enabled Kubeflow cluster. It wires together the open-source Roboflow stack,
-Kubeflow Pipelines, MLflow, and KServe into a single end-to-end loop:
+GPU-enabled Kubeflow cluster. It wires together Kubeflow Pipelines, MLflow,
+and KServe into a single end-to-end loop:
 
-> **Roboflow Universe dataset → Kubeflow Pipeline (load → train YOLOv8 on GPU →
+> **COCO128 dataset → Kubeflow Pipeline (load → train YOLOv8 on GPU →
 > evaluate → register) → self-hosted MLflow (tracking + registry) →
 > KServe InferenceService → `supervision` visualization.**
 
@@ -20,9 +20,9 @@ with Kubeflow **26.03**; an LKE preset (`platform/presets/lke.env`) is included
 for that path. The companion cluster-provisioning repo is
 [`akamai-lke-gpu-cluster`](https://github.com/idvoretskyi/linode-gpu-k8s).
 
-> **Status:** scaffolding. The cluster manifests, pipeline, serving image, and
-> notebook are added in later phases (see [Roadmap](#roadmap)). The platform
-> installer and demo pipelines are ready now.
+> **Status:** all five phases complete. The platform installer, cluster
+> manifests, Kubeflow Pipeline, KServe serving image, and visualization notebook
+> are all implemented and verified end-to-end on Kubeflow 26.03 on LKE.
 
 ## Architecture
 
@@ -42,7 +42,7 @@ for that path. The companion cluster-provisioning repo is
 
 | Concern | Tool | Where |
 |---|---|---|
-| Dataset | `roboflow` SDK / Universe | pipeline step |
+| Dataset | [COCO128](https://docs.ultralytics.com/datasets/detect/coco/) (overridable via `dataset_url`) | pipeline step |
 | Orchestration | Kubeflow Pipelines (KFP v2) | kubeflow ns |
 | Training | Ultralytics YOLOv8 (CUDA) | GPU pool (taint toleration) |
 | Tracking + registry | MLflow (self-hosted) | `cv-lab` ns |
@@ -168,10 +168,10 @@ kubeflow-cv-lab/
 
 - [x] **Phase 0** — platform installer (`platform/`) + demo pipelines (`examples/`)
 - [x] **Phase 1** — repository baseline (docs, CI, conventions)
-- [ ] **Phase 2** — `deploy/` manifests (namespace, NetworkPolicy, Postgres, MLflow)
-- [ ] **Phase 3** — `pipeline/` Kubeflow Pipeline (load → train → evaluate → register)
-- [ ] **Phase 4** — `images/serving` + `serving/` KServe InferenceService
-- [ ] **Phase 5** — `notebooks/explore.ipynb` (supervision visualization)
+- [x] **Phase 2** — `deploy/` manifests (namespace, NetworkPolicy, Postgres, MLflow)
+- [x] **Phase 3** — `pipeline/` Kubeflow Pipeline (load → train → evaluate → register)
+- [x] **Phase 4** — `images/serving` + `serving/` KServe InferenceService
+- [x] **Phase 5** — `notebooks/explore.ipynb` (supervision visualization)
 
 ## License
 
