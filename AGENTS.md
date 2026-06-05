@@ -21,6 +21,7 @@ installs the NVIDIA GPU operator; it is the de-facto tested platform for this
 lab (Linode/Akamai LKE), but the lab itself is cloud-neutral.
 
 **Cross-repo contract:**
+
 - `akamai-lke-gpu-cluster` = pure OpenTofu cloud substrate (LKE cluster, GPU Operator, monitoring).
 - `kubeflow-cv-lab` = portable ML platform + application layer (this repo).
 - Cloud-specific literals belong only in `akamai-lke-gpu-cluster/tofu/locals.tf`

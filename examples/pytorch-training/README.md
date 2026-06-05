@@ -74,7 +74,7 @@ VALIDATION PASSED
   `platform/install.sh` step 5.
 - For pure GPU substrate validation (no Kubeflow required), see
   [`examples/gpu-validation/`](../gpu-validation/) in
-  [`akamai-lke-gpu-cluster`](https://github.com/idvoretskyi/linode-gpu-k8s).
+  [`akamai-lke-gpu-cluster`](https://github.com/idvoretskyi/akamai-lke-gpu-cluster).
 
 ## Customisation
 
