@@ -110,4 +110,6 @@ class YOLOv8Model(kserve.Model):
 if __name__ == "__main__":
     model_name = os.environ.get("MODEL_NAME", "yolov8-coco128")
     model = YOLOv8Model(name=model_name)
+    # kserve 0.16 checks model.ready *before* calling model.start(); load first.
+    model.load()
     kserve.ModelServer().start([model])

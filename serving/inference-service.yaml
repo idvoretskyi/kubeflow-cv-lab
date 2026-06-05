@@ -4,7 +4,10 @@ metadata:
   name: yolov8-coco128
   namespace: cv-lab
   annotations:
-    sidecar.istio.io/inject: "true"
+    # RawDeployment uses a standard K8s Deployment instead of Knative Serving.
+    # This allows tolerations (required to land on the GPU node because the
+    # system node is at capacity) and avoids Knative's toleration restriction.
+    serving.kserve.io/deploymentMode: RawDeployment
 spec:
   predictor:
     # Tolerate the nvidia.com/gpu taint so the pod can land on the GPU node.
@@ -29,8 +32,8 @@ spec:
             protocol: TCP
         resources:
           requests:
-            cpu: "500m"
-            memory: "1Gi"
+            cpu: "100m"
+            memory: "512Mi"
           limits:
             cpu: "2"
             memory: "3Gi"
