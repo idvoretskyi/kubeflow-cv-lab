@@ -152,17 +152,31 @@ kubeflow-cv-lab/
 ├── README.md            # this file
 ├── AGENTS.md            # guide for AI agents and contributors
 ├── LICENSE              # MIT
-├── Makefile             # venv / compile / lint / deploy / platform helpers
+├── Makefile             # venv / compile / lint / deploy / platform / tofu helpers
 ├── platform/            # portable Kubeflow installer (install.sh, uninstall.sh, config)
 ├── examples/
-│   └── kubeflow-pipelines/  # hello-world + GPU smoke-test pipelines
+│   ├── kubeflow-pipelines/  # hello-world + GPU smoke-test pipelines
+│   └── pytorch-training/    # Kubeflow Trainer v2 (TrainJob) GPU validation job
 ├── deploy/              # cluster manifests: namespace, NetworkPolicy, Postgres, MLflow
+├── tofu/                # OpenTofu module: MLflow + Postgres (lab-local platform layer)
 ├── pipeline/            # Kubeflow Pipeline (KFP v2): load → train → evaluate → register
 ├── images/              # container images (KServe serving predictor)
 ├── serving/             # KServe InferenceService + S3 service account
 ├── notebooks/           # supervision visualization notebook
 └── secrets/             # *.example.yaml templates (real secrets are git-ignored)
 ```
+
+## Cross-repo contract
+
+| Layer | Repo | Manages |
+|---|---|---|
+| Cloud substrate | [`akamai-lke-gpu-cluster`](https://github.com/idvoretskyi/linode-gpu-k8s) | LKE cluster, GPU Operator, monitoring (OpenTofu) |
+| ML platform + application | this repo (`kubeflow-cv-lab`) | Kubeflow installer, MLflow+Postgres (OpenTofu), KServe, pipelines |
+
+Cloud-specific literals live only in:
+- `akamai-lke-gpu-cluster/tofu/locals.tf` — `nodepool.lke/role` label
+- `kubeflow-cv-lab/platform/presets/lke.env` — LKE-specific webhook CIDRs
+- `kubeflow-cv-lab/tofu/tofu.tfvars` (git-ignored) — `postgres_storage_class`
 
 ## Roadmap
 

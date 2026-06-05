@@ -1,0 +1,11 @@
+# kubeflow-cv-lab — OpenTofu variable overrides.
+# Copy to tofu.tfvars (git-ignored) and fill in values for your cluster.
+
+# Kubernetes context (defaults to current context in kubeconfig).
+# kubernetes_context = "lke1234567-ctx"
+
+# Postgres PVC StorageClass.
+# "linode-block-storage-retain" — recommended on Akamai LKE: persists the volume
+# across node replacements and retains it after PVC deletion (no accidental data loss).
+# "" (empty) — use the cluster default StorageClass.
+postgres_storage_class = "linode-block-storage-retain"

@@ -49,6 +49,34 @@ _PYTHON = "python:3.11-slim"
 
 
 # ---------------------------------------------------------------------------
+# GPU scheduling helper
+# ---------------------------------------------------------------------------
+def _apply_gpu_scheduling(task: dsl.PipelineTask, *, require_gpu: bool = False) -> None:
+    """Apply GPU scheduling constraints to a KFP task.
+
+    When ``require_gpu=True``: requests the GPU resource (accelerator type +
+    limit = 1), adds the taint toleration, and (if ``GPU_NODE_SELECTOR_KEY`` is
+    set) adds the GFD node selector.
+
+    When ``require_gpu=False``: adds only the taint toleration so the task can
+    be scheduled on GPU nodes when the system pool is at capacity — without
+    consuming a GPU resource slot.
+    """
+    if require_gpu:
+        task.set_accelerator_type("nvidia.com/gpu")
+        task.set_accelerator_limit(1)
+    kubernetes.add_toleration(
+        task, key=GPU_TAINT_KEY, operator="Exists", effect=GPU_TAINT_EFFECT
+    )
+    if require_gpu and GPU_NODE_SELECTOR_KEY:
+        kubernetes.add_node_selector(
+            task,
+            label_key=GPU_NODE_SELECTOR_KEY,
+            label_value=GPU_NODE_SELECTOR_VALUE,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Step 1: load_data
 # ---------------------------------------------------------------------------
 @dsl.component(
@@ -333,11 +361,9 @@ def yolov8_pipeline(
     # load_data — CPU, downloads dataset from a URL
     # ------------------------------------------------------------------
     load_task = load_data(dataset_url=dataset_url, dataset_yaml_url=dataset_yaml_url)
-    # GPU taint toleration needed for all steps: the system node is at capacity
-    # so all pods must be able to land on the GPU node.
-    kubernetes.add_toleration(
-        load_task, key=GPU_TAINT_KEY, operator="Exists", effect=GPU_TAINT_EFFECT
-    )
+    # System pool is at capacity; tolerate GPU taint so this pod can land on the
+    # GPU node without consuming a GPU resource slot.
+    _apply_gpu_scheduling(load_task)
 
     # ------------------------------------------------------------------
     # train — GPU required
@@ -350,22 +376,7 @@ def yolov8_pipeline(
         mlflow_tracking_uri=mlflow_tracking_uri,
         experiment_name=experiment_name,
     )
-
-    # GPU contract (matches AGENTS.md)
-    train_task.set_accelerator_type("nvidia.com/gpu")
-    train_task.set_accelerator_limit(1)
-    kubernetes.add_toleration(
-        train_task,
-        key=GPU_TAINT_KEY,
-        operator="Exists",
-        effect=GPU_TAINT_EFFECT,
-    )
-    if GPU_NODE_SELECTOR_KEY:
-        kubernetes.add_node_selector(
-            train_task,
-            label_key=GPU_NODE_SELECTOR_KEY,
-            label_value=GPU_NODE_SELECTOR_VALUE,
-        )
+    _apply_gpu_scheduling(train_task, require_gpu=True)
 
     # ------------------------------------------------------------------
     # evaluate — CPU (keeps the GPU free after training)
@@ -376,9 +387,7 @@ def yolov8_pipeline(
         mlflow_tracking_uri=mlflow_tracking_uri,
         run_id=train_task.outputs["Output"],
     )
-    kubernetes.add_toleration(
-        eval_task, key=GPU_TAINT_KEY, operator="Exists", effect=GPU_TAINT_EFFECT
-    )
+    _apply_gpu_scheduling(eval_task)
 
     # ------------------------------------------------------------------
     # register — CPU
@@ -389,9 +398,7 @@ def yolov8_pipeline(
         mlflow_tracking_uri=mlflow_tracking_uri,
         map50_95=eval_task.outputs["Output"],
     )
-    kubernetes.add_toleration(
-        reg_task, key=GPU_TAINT_KEY, operator="Exists", effect=GPU_TAINT_EFFECT
-    )
+    _apply_gpu_scheduling(reg_task)
 
 
 # ---------------------------------------------------------------------------

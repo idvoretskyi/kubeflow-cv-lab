@@ -8,10 +8,11 @@
 #   make examples-compile           # compile examples/kubeflow-pipelines/*.py -> *.yaml
 #   make lint                       # ruff + yamllint (best-effort; installs into the venv)
 #   make deploy                     # kubectl apply -k deploy/ (requires a configured kubeconfig)
+#   make tofu-init                  # tofu init -backend-config=tofu/backend.conf
+#   make tofu-plan                  # tofu plan -var-file=tofu/tofu.tfvars
+#   make tofu-apply                 # tofu apply -var-file=tofu/tofu.tfvars
+#   make tofu-destroy               # tofu destroy -var-file=tofu/tofu.tfvars
 #   make clean                      # remove the venv and compiled artifacts
-#
-# NOTE: deploy/, pipeline/, and serving/ are filled in during later phases.
-# The targets are defined now so the workflow is stable from day one.
 
 VENV ?= .venv
 PY   := $(VENV)/bin/python
@@ -19,11 +20,14 @@ PIP  := $(VENV)/bin/pip
 
 NAMESPACE ?= cv-lab
 PRESET    ?=
+TOFU_DIR  := tofu
 
-.PHONY: platform-install platform-uninstall venv compile examples-compile lint deploy serve clean help
+.PHONY: platform-install platform-uninstall venv compile examples-compile lint deploy \
+        tofu-init tofu-plan tofu-apply tofu-destroy serve clean help
 
 help:
-	@echo "Targets: platform-install platform-uninstall venv compile examples-compile lint deploy serve clean"
+	@echo "Targets: platform-install platform-uninstall venv compile examples-compile lint deploy"
+	@echo "         tofu-init tofu-plan tofu-apply tofu-destroy serve clean"
 
 # ---------------------------------------------------------------------------
 # Platform (Kubeflow install / uninstall)
@@ -75,6 +79,29 @@ deploy:
 
 serve:
 	kubectl apply -k serving/
+
+# ---------------------------------------------------------------------------
+# Tofu (MLflow + Postgres platform layer)
+# ---------------------------------------------------------------------------
+# Prerequisites:
+#   cp tofu/backend.conf.example tofu/backend.conf   # fill in Linode OBJ keys
+#   cp tofu/tofu.tfvars.example  tofu/tofu.tfvars    # set postgres_storage_class
+
+tofu-init:
+	tofu -chdir=$(TOFU_DIR) init -backend-config=backend.conf
+
+tofu-plan:
+	tofu -chdir=$(TOFU_DIR) plan -var-file=tofu.tfvars
+
+tofu-apply:
+	tofu -chdir=$(TOFU_DIR) apply -var-file=tofu.tfvars
+
+tofu-destroy:
+	tofu -chdir=$(TOFU_DIR) destroy -var-file=tofu.tfvars
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
 
 clean:
 	rm -rf $(VENV) pipeline/pipeline.yaml

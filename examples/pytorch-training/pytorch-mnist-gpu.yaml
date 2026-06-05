@@ -1,0 +1,84 @@
+# pytorch-mnist-gpu.yaml — Kubeflow Trainer v2 GPU validation job.
+# Runs a 200-step MLP on synthetic MNIST-sized data using CUDA.
+# Requires: Kubeflow installed (platform/ installer) + GPU Operator running.
+#
+# API: trainer.kubeflow.org/v1alpha1 TrainJob (Trainer v2)
+# Runtime: torch-distributed ClusterTrainingRuntime (single-node)
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: pytorch-mnist-gpu
+  namespace: kubeflow
+  labels:
+    app: pytorch-mnist-gpu
+spec:
+  # ClusterTrainingRuntime installed by platform/install.sh (step 5)
+  runtimeRef:
+    name: torch-distributed
+  trainer:
+    image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+    command:
+      - python
+      - -c
+      - |
+        import torch, time
+
+        print(f"PyTorch version : {torch.__version__}")
+        print(f"CUDA available  : {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"GPU device      : {torch.cuda.get_device_name(0)}")
+            print(f"GPU memory      : {torch.cuda.get_device_properties(0).total_memory // 1024**2} MB")
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Training on     : {device}")
+
+        import torch.nn as nn
+        import torch.optim as optim
+
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(784, 256)
+                self.fc2 = nn.Linear(256, 128)
+                self.fc3 = nn.Linear(128, 10)
+                self.relu = nn.ReLU()
+            def forward(self, x):
+                return self.fc3(self.relu(self.fc2(self.relu(self.fc1(x)))))
+
+        model = Net().to(device)
+        optimizer = optim.Adam(model.parameters(), lr=1e-3)
+        criterion = nn.CrossEntropyLoss()
+
+        batch_size, input_dim, num_classes, steps = 256, 784, 10, 200
+        t0 = time.time()
+        for step in range(1, steps + 1):
+            x = torch.randn(batch_size, input_dim, device=device)
+            y = torch.randint(0, num_classes, (batch_size,), device=device)
+            optimizer.zero_grad()
+            loss = criterion(model(x), y)
+            loss.backward()
+            optimizer.step()
+            if step % 50 == 0:
+                print(f"  step {step:3d}/{steps}  loss={loss.item():.4f}")
+
+        elapsed = time.time() - t0
+        throughput = (steps * batch_size) / elapsed
+        print(f"Training complete: {steps} steps in {elapsed:.1f}s "
+              f"({throughput:.0f} samples/s on {device})")
+        print("VALIDATION PASSED")
+    numNodes: 1
+    resourcesPerNode:
+      requests:
+        memory: "2Gi"
+        cpu: "500m"
+        nvidia.com/gpu: "1"
+      limits:
+        nvidia.com/gpu: "1"
+  podTemplateOverrides:
+    - targetJobs:
+        - name: node
+      spec:
+        tolerations:
+          - key: "nvidia.com/gpu"
+            operator: "Exists"
+            effect: "NoSchedule"
