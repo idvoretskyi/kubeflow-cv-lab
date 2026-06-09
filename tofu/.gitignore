@@ -1,0 +1,14 @@
+# OpenTofu working directory and downloaded providers.
+.terraform/
+.terraform.lock.hcl
+
+# Local Tofu state (use the S3 backend — see backend.conf.example).
+terraform.tfstate
+terraform.tfstate.backup
+
+# Variable values (may contain credentials or cluster-specific paths).
+*.tfvars
+!tofu.tfvars.example
+
+# Backend config (contains Linode OBJ access keys).
+backend.conf

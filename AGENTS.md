@@ -16,9 +16,16 @@ This repo also ships a **portable Kubeflow installer** (`platform/`) for any
 GPU-enabled Kubernetes cluster.
 
 The companion infrastructure repo is `akamai-lke-gpu-cluster`
-(GitHub: `idvoretskyi/linode-gpu-k8s`). That repo provisions the cluster and
+(GitHub: `idvoretskyi/akamai-lke-gpu-cluster`). That repo provisions the cluster and
 installs the NVIDIA GPU operator; it is the de-facto tested platform for this
 lab (Linode/Akamai LKE), but the lab itself is cloud-neutral.
+
+**Cross-repo contract:**
+
+- `akamai-lke-gpu-cluster` = pure OpenTofu cloud substrate (LKE cluster, GPU Operator, monitoring).
+- `kubeflow-cv-lab` = portable ML platform + application layer (this repo).
+- Cloud-specific literals belong only in `akamai-lke-gpu-cluster/tofu/locals.tf`
+  and `kubeflow-cv-lab/platform/presets/lke.env`.
 
 ## Repository layout
 
@@ -26,7 +33,9 @@ lab (Linode/Akamai LKE), but the lab itself is cloud-neutral.
 |---|---|
 | `platform/` | Portable Kubeflow installer: `install.sh`, `uninstall.sh`, `config.env.example`, `README.md`. |
 | `examples/kubeflow-pipelines/` | Hello-world + GPU smoke-test pipelines. Doubles as post-install smoke test. |
+| `examples/pytorch-training/` | Kubeflow Trainer v2 GPU validation job (`TrainJob` API). Requires Kubeflow installed. |
 | `deploy/` | Cluster manifests (kustomize): `cv-lab` namespace, the additive SeaweedFS NetworkPolicy, Postgres, MLflow server. |
+| `tofu/` | OpenTofu module managing MLflow + Postgres on the cluster (lab-local platform layer). State in Linode OBJ S3. |
 | `pipeline/` | Kubeflow Pipeline (KFP v2): `load_data → train → evaluate → register`. Source `pipeline.py` + committed compiled `pipeline.yaml`. |
 | `images/` | Container images that must be built/pushed (KServe serving predictor). |
 | `serving/` | KServe `InferenceService` + S3-backed `ServiceAccount`/`Secret`. |
@@ -110,6 +119,9 @@ make compile             # pipeline.py -> pipeline.yaml (commit the result)
 make examples-compile    # examples/kubeflow-pipelines/*.py -> *.yaml
 make lint                # ruff + yamllint
 make deploy              # kubectl apply -k deploy/   (needs a kubeconfig)
+make tofu-init           # tofu init (needs tofu/backend.conf)
+make tofu-plan           # tofu plan (needs tofu/tofu.tfvars)
+make tofu-apply          # tofu apply — deploys MLflow + Postgres
 ```
 
 CI (`.github/workflows/ci.yml`) runs: `ruff`, `yamllint`, `kubeconform`,

@@ -1,0 +1,21 @@
+# Linode Object Storage S3 backend for kubeflow-cv-lab Tofu state.
+# Copy to backend.conf, fill in your values, then:
+#   tofu init -backend-config=backend.conf
+#
+# Create the bucket first (once):
+#   linode-cli obj mb s3://kubeflow-cv-lab-tofu-state
+#
+# Note: the actual OBJ endpoint hostname is printed on bucket creation
+# (e.g. us-ord-10.linodeobjects.com for the us-ord region). Use that
+# hostname, NOT "us-ord-1.linodeobjects.com".
+#
+bucket                      = "kubeflow-cv-lab-tofu-state"
+key                         = "platform/terraform.tfstate"
+region                      = "us-ord-1"
+endpoint                    = "https://us-ord-10.linodeobjects.com"
+access_key                  = "YOUR_LINODE_OBJ_ACCESS_KEY"
+secret_key                  = "YOUR_LINODE_OBJ_SECRET_KEY"
+skip_credentials_validation = true
+skip_region_validation      = true
+skip_metadata_api_check     = true
+use_path_style              = true

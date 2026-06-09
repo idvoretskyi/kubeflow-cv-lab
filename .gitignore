@@ -23,6 +23,7 @@ kubeconfig*.yaml
 # Secrets — never commit real credentials. Only *.example.yaml is tracked.
 secrets/*.yaml
 !secrets/*.example.yaml
+deploy/postgres/secret.yaml
 *.env
 .env
 .env.local

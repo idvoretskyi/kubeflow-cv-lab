@@ -10,7 +10,7 @@ deploy/
 ├── cluster/
 │   └── networkpolicy-seaweedfs.yaml    # Only change to the kubeflow namespace: allow cv-lab → seaweedfs:8333
 ├── postgres/
-│   ├── pvc.yaml                        # 10 Gi PVC (linode-block-storage-retain)
+│   ├── pvc.yaml                        # 10 Gi PVC (cloud-neutral; set storageClass via Tofu or kustomize patch)
 │   ├── deployment.yaml                 # postgres:16-alpine
 │   ├── service.yaml
 │   └── secret.example.yaml            # Copy to secret.yaml and fill in passwords
@@ -21,7 +21,19 @@ deploy/
 └── kustomization.yaml
 ```
 
-## Quick-start
+## Option A — Tofu-managed (recommended)
+
+```bash
+cd tofu
+cp backend.conf.example backend.conf   # fill in Linode OBJ keys
+cp tofu.tfvars.example tofu.tfvars     # set postgres_storage_class for your cluster
+tofu init -backend-config=backend.conf
+tofu apply -var-file=tofu.tfvars
+```
+
+Secrets and the Profile CR are applied separately (see Option B steps 1–2).
+
+## Option B — kubectl / kustomize
 
 ```bash
 # 1. Create the Profile (namespace + RBAC)
@@ -56,3 +68,6 @@ kubectl port-forward svc/mlflow 5000:5000 -n cv-lab
 - The `seaweedfs-s3-credentials` Secret is namespace-scoped to `cv-lab`; it is
   never read cross-namespace.
 - `deploy/postgres/secret.yaml` and `secrets/*.yaml` are git-ignored.
+- `deploy/postgres/pvc.yaml` omits `storageClassName` so it works on any cluster.
+  Set `postgres_storage_class = "linode-block-storage-retain"` in `tofu/tofu.tfvars`
+  for Akamai LKE to ensure volume persistence across node replacements.

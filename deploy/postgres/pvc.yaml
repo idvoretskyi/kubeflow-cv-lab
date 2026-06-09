@@ -4,7 +4,10 @@ metadata:
   name: postgres-pvc
   namespace: cv-lab
 spec:
-  storageClassName: linode-block-storage-retain
+  # storageClassName is intentionally omitted here so this file is cloud-neutral
+  # and uses the cluster default StorageClass.
+  # For Tofu-managed deployments, set postgres_storage_class in tofu/tofu.tfvars
+  # (e.g. "linode-block-storage-retain" on Akamai LKE).
   accessModes:
     - ReadWriteOnce
   resources:
