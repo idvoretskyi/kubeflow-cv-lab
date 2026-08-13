@@ -3,5 +3,5 @@ ultralytics>=8.0
 # KServe Python SDK — must be compatible with the cluster's KServe version (v0.16)
 kserve>=0.13,<0.17
 # MLflow client — pinned to match the self-hosted server (3.11.1)
-mlflow==3.11.1
+mlflow==3.13.0rc0
 Pillow>=10.0
