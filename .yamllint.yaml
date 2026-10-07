@@ -12,3 +12,4 @@ rules:
 ignore: |
   .venv/
   pipeline/pipeline.yaml
+  examples/kubeflow-pipelines/*_pipeline.yaml

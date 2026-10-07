@@ -1,0 +1,7 @@
+# Default (cloud-neutral) lab layer. See base/ for the resources and
+# overlays/<name>/ for cloud-specific variants (e.g. overlays/lke).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - base

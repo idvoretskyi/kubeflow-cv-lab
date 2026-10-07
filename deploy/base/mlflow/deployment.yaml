@@ -8,7 +8,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: Recreate   # GPU node is resource-constrained; old pod must exit before new one schedules
+    type: Recreate
   selector:
     matchLabels:
       app: mlflow
@@ -17,112 +17,125 @@ spec:
       labels:
         app: mlflow
       annotations:
-        # Keep MLflow outside the Istio mesh to avoid mTLS complexity.
         sidecar.istio.io/inject: "false"
     spec:
       tolerations:
-        # Allow scheduling on GPU nodes (the system pool is undersized;
-        # GPU node has ample RAM and this pod requests no GPU resource).
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
       initContainers:
-        # Run Alembic schema migration before the server starts.
-        # Idempotent: no-op when the schema is already at head.
-        # Note: on a completely fresh Postgres, mlflow server handles schema
-        # creation automatically on first start. mlflow db upgrade is only
-        # needed when upgrading an existing schema; skip it for fresh databases
-        # by falling back gracefully.
-        - name: mlflow-db-upgrade
-          image: ghcr.io/mlflow/mlflow:v3.11.1
+        # One init step does all one-shot setup, idempotently:
+        #   1. install the Postgres (psycopg 3) / S3 drivers into a shared volume (no custom image)
+        #   2. create the `mlflow` bucket in SeaweedFS if missing
+        #   3. migrate the DB schema (no-op on a fresh DB; mlflow server creates it)
+        - name: setup
+          image: ghcr.io/mlflow/mlflow:v3.17.0
           command:
             - bash
-            - -c
+            - -ec
             - |
-              pip install --quiet psycopg2-binary && \
-              DB_URL="postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)" && \
-              mlflow db upgrade "$DB_URL" || \
-              echo "mlflow db upgrade failed (likely fresh DB — mlflow server will create schema); continuing."
+              pip install --quiet --target /deps 'psycopg[binary]' boto3
+              export PYTHONPATH=/deps
+              python - <<'PY'
+              import os, boto3, botocore
+              s3 = boto3.client(
+                  "s3",
+                  endpoint_url=os.environ["MLFLOW_S3_ENDPOINT_URL"],
+                  config=botocore.config.Config(s3={"addressing_style": "path"}),
+              )
+              try:
+                  s3.head_bucket(Bucket="mlflow")
+                  print("bucket mlflow exists")
+              except botocore.exceptions.ClientError:
+                  s3.create_bucket(Bucket="mlflow")
+                  print("bucket mlflow created")
+              PY
+              mlflow db upgrade "$BACKEND_STORE_URI" \
+                || echo "db upgrade skipped (fresh database); mlflow server will create the schema"
+          envFrom:
+            - secretRef:
+                name: seaweedfs-s3-credentials
           env:
             - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-credentials, key: POSTGRES_USER}}
             - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-credentials, key: POSTGRES_PASSWORD}}
             - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_DB
-      containers:
-        - name: mlflow
-          image: ghcr.io/mlflow/mlflow:v3.11.1
-          command:
-            - bash
-            - -c
-            - |
-              pip install --quiet psycopg2-binary boto3 && \
-              mlflow server \
-                --host 0.0.0.0 \
-                --port 5000 \
-                --allowed-hosts "*" \
-                --backend-store-uri postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB) \
-                --serve-artifacts \
-                --artifacts-destination s3://mlflow
-          ports:
-            - containerPort: 5000
-          env:
-            # Postgres connection info from shared secret
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_PASSWORD
-            - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-credentials
-                  key: POSTGRES_DB
-            # SeaweedFS S3 for artifact storage
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: seaweedfs-s3-credentials
-                  key: AWS_ACCESS_KEY_ID
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: seaweedfs-s3-credentials
-                  key: AWS_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: postgres-credentials, key: POSTGRES_DB}}
+            - name: BACKEND_STORE_URI
+              value: postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)
             - name: MLFLOW_S3_ENDPOINT_URL
               value: http://seaweedfs.kubeflow:8333
             - name: AWS_DEFAULT_REGION
               value: us-east-1
             - name: MLFLOW_S3_IGNORE_TLS
               value: "true"
-            # Force path-style S3 (required for SeaweedFS)
-            - name: MLFLOW_S3_ADDRESSING_STYLE
-              value: path
+            - name: PYTHONPATH
+              value: /deps
+          volumeMounts:
+            - name: deps
+              mountPath: /deps
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              memory: 1Gi
+      containers:
+        - name: mlflow
+          image: ghcr.io/mlflow/mlflow:v3.17.0
+          command:
+            - mlflow
+            - server
+            - --host=0.0.0.0
+            - --port=5000
+            - --allowed-hosts=*
+            - --backend-store-uri=$(BACKEND_STORE_URI)
+            - --serve-artifacts
+            - --artifacts-destination=s3://mlflow
+          ports:
+            - name: http
+              containerPort: 5000
+          envFrom:
+            - secretRef:
+                name: seaweedfs-s3-credentials
+          env:
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: postgres-credentials, key: POSTGRES_USER}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgres-credentials, key: POSTGRES_PASSWORD}}
+            - name: POSTGRES_DB
+              valueFrom: {secretKeyRef: {name: postgres-credentials, key: POSTGRES_DB}}
+            - name: BACKEND_STORE_URI
+              value: postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: http://seaweedfs.kubeflow:8333
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: MLFLOW_S3_IGNORE_TLS
+              value: "true"
+            - name: PYTHONPATH
+              value: /deps
+          volumeMounts:
+            - name: deps
+              mountPath: /deps
           resources:
             requests:
               cpu: 200m
               memory: 512Mi
             limits:
-              memory: 2Gi
+              memory: 1536Mi
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
-            httpGet:
-              path: /health
-              port: 5000
-            initialDelaySeconds: 30
+            httpGet: {path: /health, port: http}
             periodSeconds: 10
-            failureThreshold: 6
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 30
+            failureThreshold: 4
+      volumes:
+        - name: deps
+          emptyDir: {}

@@ -1,0 +1,16 @@
+# Akamai/Linode LKE overlay: keep the Postgres volume if the PVC is deleted or
+# the node is replaced. Usage: make deploy OVERLAY=lke
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+patches:
+  - target:
+      kind: PersistentVolumeClaim
+      name: postgres-pvc
+    patch: |-
+      - op: add
+        path: /spec/storageClassName
+        value: linode-block-storage-retain
