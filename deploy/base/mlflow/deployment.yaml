@@ -50,8 +50,7 @@ spec:
                   s3.create_bucket(Bucket="mlflow")
                   print("bucket mlflow created")
               PY
-              mlflow db upgrade "$BACKEND_STORE_URI" \
-                || echo "db upgrade skipped (fresh database); mlflow server will create the schema"
+              mlflow db upgrade "$BACKEND_STORE_URI"
           envFrom:
             - secretRef:
                 name: seaweedfs-s3-credentials

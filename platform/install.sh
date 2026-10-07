@@ -60,9 +60,23 @@
 set -eu
 
 # ---------------------------------------------------------------------------
-# Source preset then config.env (CLI env wins over both).
+# Source preset then config.env; explicitly supplied environment values win.
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Preserve caller-provided values before either file can override them.
+CLI_KF_VERSION_SET=${KF_VERSION+x}
+CLI_KF_VERSION=${KF_VERSION-}
+CLI_KF_PROFILE_SET=${KF_PROFILE+x}
+CLI_KF_PROFILE=${KF_PROFILE-}
+CLI_KF_GPU_TOLERATION_KEY_SET=${KF_GPU_TOLERATION_KEY+x}
+CLI_KF_GPU_TOLERATION_KEY=${KF_GPU_TOLERATION_KEY-}
+CLI_KF_WEBHOOK_ACCESS_SET=${KF_WEBHOOK_ACCESS+x}
+CLI_KF_WEBHOOK_ACCESS=${KF_WEBHOOK_ACCESS-}
+CLI_KF_APISERVER_CIDRS_SET=${KF_APISERVER_CIDRS+x}
+CLI_KF_APISERVER_CIDRS=${KF_APISERVER_CIDRS-}
+CLI_KF_POD_CIDR_SET=${KF_POD_CIDR+x}
+CLI_KF_POD_CIDR=${KF_POD_CIDR-}
 
 if [ -n "${PRESET:-}" ]; then
   PRESET_FILE="${SCRIPT_DIR}/presets/${PRESET}.env"
@@ -81,6 +95,19 @@ if [ -f "${SCRIPT_DIR}/config.env" ]; then
   # shellcheck source=/dev/null
   . "${SCRIPT_DIR}/config.env"
 fi
+
+if [ -n "${CLI_KF_VERSION_SET}" ]; then KF_VERSION=${CLI_KF_VERSION}; fi
+if [ -n "${CLI_KF_PROFILE_SET}" ]; then KF_PROFILE=${CLI_KF_PROFILE}; fi
+if [ -n "${CLI_KF_GPU_TOLERATION_KEY_SET}" ]; then
+  KF_GPU_TOLERATION_KEY=${CLI_KF_GPU_TOLERATION_KEY}
+fi
+if [ -n "${CLI_KF_WEBHOOK_ACCESS_SET}" ]; then
+  KF_WEBHOOK_ACCESS=${CLI_KF_WEBHOOK_ACCESS}
+fi
+if [ -n "${CLI_KF_APISERVER_CIDRS_SET}" ]; then
+  KF_APISERVER_CIDRS=${CLI_KF_APISERVER_CIDRS}
+fi
+if [ -n "${CLI_KF_POD_CIDR_SET}" ]; then KF_POD_CIDR=${CLI_KF_POD_CIDR}; fi
 
 # ---------------------------------------------------------------------------
 # Defaults — use the no-colon form so an explicit "" disables the feature.

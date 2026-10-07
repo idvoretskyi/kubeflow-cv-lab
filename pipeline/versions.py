@@ -1,7 +1,7 @@
 """Single source of truth for runtime versions baked into compiled pipelines.
 
 Keep in sync with:
-  * deploy/mlflow/deployment.yaml   (ghcr.io/mlflow/mlflow:v<MLFLOW_VERSION>)
+  * deploy/base/mlflow/deployment.yaml (ghcr.io/mlflow/mlflow:v<MLFLOW_VERSION>)
   * images/serving/requirements.txt (mlflow==<MLFLOW_VERSION>)
 """
 
