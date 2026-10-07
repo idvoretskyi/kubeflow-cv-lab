@@ -4,37 +4,45 @@ metadata:
   name: yolov8-coco128
   namespace: cv-lab
   annotations:
-    # RawDeployment uses a standard K8s Deployment instead of Knative Serving.
-    # This allows tolerations (required to land on the GPU node because the
-    # system node is at capacity) and avoids Knative's toleration restriction.
-    serving.kserve.io/deploymentMode: RawDeployment
+    # Plain Deployment + Service (no Knative). The minimal Kubeflow profile does
+    # not install Knative; RawDeployment is also the cheapest mode to run.
+    serving.kserve.io/deploymentMode: Standard
 spec:
   predictor:
-    # Tolerate the nvidia.com/gpu taint so the pod can land on the GPU node.
-    # The system node is at capacity; this toleration is required even though
-    # the predictor runs CPU-only inference.
+    minReplicas: 1
+    maxReplicas: 1
+    # CPU-only predictor. Tolerating the GPU taint lets it use spare CPU/RAM on
+    # the GPU node of the 2-node reference cluster without requesting a GPU.
     tolerations:
       - key: nvidia.com/gpu
         operator: Exists
         effect: NoSchedule
     containers:
       - name: kserve-container
+        # Pin to a commit SHA (`:<git-sha>`) for reproducible rollouts.
         image: ghcr.io/idvoretskyi/kubeflow-cv-lab-serving:latest
-        imagePullPolicy: Always
         env:
           - name: MODEL_NAME
-            value: "yolov8-coco128"
+            value: yolov8-coco128
+          # The `champion` alias is moved by the pipeline's register step, so
+          # `kubectl rollout restart` picks up the newest trained model.
           - name: MODEL_URI
-            value: "models:/yolov8-coco128/1"
+            value: models:/yolov8-coco128@champion
           - name: MLFLOW_TRACKING_URI
-            value: "http://mlflow.cv-lab:5000"
+            value: http://mlflow.cv-lab:5000
         ports:
           - containerPort: 8080
             protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /v1/models/yolov8-coco128
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 30
         resources:
           requests:
-            cpu: "100m"
-            memory: "512Mi"
+            cpu: 500m
+            memory: 1Gi
           limits:
-            cpu: "2"
-            memory: "3Gi"
+            memory: 2Gi

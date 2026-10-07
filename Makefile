@@ -1,107 +1,100 @@
-# kubeflow-cv-lab — developer tasks
+# kubeflow-cv-lab — developer tasks. `make help` lists targets.
 #
-#   make platform-install           # install Kubeflow (auto-detects webhook sources)
-#   make platform-install PRESET=lke  # install using the LKE preset
-#   make platform-uninstall         # remove Kubeflow from the current cluster context
-#   make venv                       # create a local virtualenv with the pipeline SDK
-#   make compile                    # compile pipeline/pipeline.py -> pipeline/pipeline.yaml
-#   make examples-compile           # compile examples/kubeflow-pipelines/*.py -> *.yaml
-#   make lint                       # ruff + yamllint (best-effort; installs into the venv)
-#   make deploy                     # kubectl apply -k deploy/ (requires a configured kubeconfig)
-#   make tofu-init                  # tofu init -backend-config=tofu/backend.conf
-#   make tofu-plan                  # tofu plan -var-file=tofu/tofu.tfvars
-#   make tofu-apply                 # tofu apply -var-file=tofu/tofu.tfvars
-#   make tofu-destroy               # tofu destroy -var-file=tofu/tofu.tfvars
-#   make clean                      # remove the venv and compiled artifacts
+# Zero to a served model on a GPU cluster with the NVIDIA GPU Operator:
+#   make platform-install PRESET=lke   # Kubeflow 26.03.1, minimal profile
+#   make bootstrap                     # cv-lab Profile + Secrets
+#   make deploy OVERLAY=lke            # Postgres + MLflow
+#   make compile                       # then upload pipeline/pipeline.yaml in the KFP UI
+#   make serve                         # KServe InferenceService (after the run)
 
-VENV ?= .venv
-PY   := $(VENV)/bin/python
-PIP  := $(VENV)/bin/pip
+VENV    ?= .venv
+PY      := $(VENV)/bin/python
+PIP     := $(VENV)/bin/pip
 
-NAMESPACE ?= cv-lab
-PRESET    ?=
-TOFU_DIR  := tofu
+PRESET  ?=
+OVERLAY ?=
+DEPLOY_DIR := $(if $(OVERLAY),deploy/overlays/$(OVERLAY),deploy)
+TOFU_DIR   := tofu
 
-.PHONY: platform-install platform-uninstall venv compile examples-compile lint deploy \
-        tofu-init tofu-plan tofu-apply tofu-destroy serve clean help
+.DEFAULT_GOAL := help
+.PHONY: help platform-install platform-uninstall bootstrap deploy serve \
+        venv compile examples-compile lint \
+        port-forward-dashboard port-forward-kfp port-forward-mlflow port-forward-predictor \
+        tofu-init tofu-plan tofu-apply tofu-destroy clean
 
-help:
-	@echo "Targets: platform-install platform-uninstall venv compile examples-compile lint deploy"
-	@echo "         tofu-init tofu-plan tofu-apply tofu-destroy serve clean"
+help: ## Show this help
+	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z_-]+:.*## /{printf "  %-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-# ---------------------------------------------------------------------------
-# Platform (Kubeflow install / uninstall)
-# ---------------------------------------------------------------------------
+# --- Platform -----------------------------------------------------------------
 
-platform-install:
-	@if [ -n "$(PRESET)" ]; then \
-		echo "Using preset: $(PRESET)"; \
-	elif [ -f platform/config.env ]; then \
-		echo "Using platform/config.env"; \
-	else \
-		echo "Note: no preset or config.env — using built-in defaults (auto webhook detection)."; \
-		echo "  Use PRESET=lke for Linode/Akamai LKE, or copy platform/config.env.example."; \
-	fi
+platform-install: ## Install Kubeflow (PRESET=lke, KF_PROFILE=minimal|full)
 	PRESET=$(PRESET) sh platform/install.sh
 
-platform-uninstall:
-	sh platform/uninstall.sh
+platform-uninstall: ## Remove Kubeflow from the current kube context
+	PRESET=$(PRESET) sh platform/uninstall.sh
 
-# ---------------------------------------------------------------------------
-# Pipeline SDK
-# ---------------------------------------------------------------------------
+# --- Lab layer ----------------------------------------------------------------
 
-venv:
-	python3 -m venv $(VENV)
-	$(PIP) install --upgrade pip
-	@if [ -f pipeline/requirements.txt ]; then $(PIP) install -r pipeline/requirements.txt; fi
+bootstrap: ## Create the cv-lab Profile and Secrets (idempotent)
+	sh deploy/bootstrap.sh
 
-compile:
-	@if [ -f pipeline/pipeline.py ]; then \
-		$(PY) pipeline/pipeline.py && echo "Compiled: pipeline/pipeline.yaml"; \
-	else \
-		echo "pipeline/pipeline.py not present yet (added in a later phase)."; \
-	fi
+deploy: ## Deploy Postgres + MLflow (OVERLAY=lke for Linode block storage)
+	kubectl apply -k $(DEPLOY_DIR)
+	kubectl -n cv-lab rollout status deploy/postgres --timeout=300s
+	kubectl -n cv-lab rollout status deploy/mlflow --timeout=600s
 
-examples-compile: venv
-	@cd examples/kubeflow-pipelines && \
-		../../$(VENV)/bin/python hello_pipeline.py && \
-		../../$(VENV)/bin/python gpu_pipeline.py && \
-		echo "Compiled: hello_pipeline.yaml gpu_pipeline.yaml"
-
-lint:
-	$(PIP) install --quiet ruff yamllint
-	$(VENV)/bin/ruff check . || true
-	$(VENV)/bin/yamllint -d relaxed . || true
-
-deploy:
-	kubectl apply -k deploy/
-
-serve:
+serve: ## Deploy the KServe InferenceService (needs a registered model)
 	kubectl apply -k serving/
+	kubectl -n cv-lab wait isvc/yolov8-coco128 --for=condition=Ready --timeout=900s
 
-# ---------------------------------------------------------------------------
-# Tofu (MLflow + Postgres platform layer)
-# ---------------------------------------------------------------------------
-# Prerequisites:
-#   cp tofu/backend.conf.example tofu/backend.conf   # fill in Linode OBJ keys
-#   cp tofu/tofu.tfvars.example  tofu/tofu.tfvars    # set postgres_storage_class
+# --- Pipelines ----------------------------------------------------------------
 
-tofu-init:
+$(PY):
+	python3 -m venv $(VENV)
+	$(PIP) install --quiet --upgrade pip
+	$(PIP) install --quiet -r pipeline/requirements.txt ruff yamllint
+
+venv: $(PY) ## Create the local virtualenv (KFP SDK, ruff, yamllint)
+
+compile: $(PY) ## Compile pipeline/pipeline.py -> pipeline/pipeline.yaml
+	$(PY) pipeline/pipeline.py
+
+examples-compile: $(PY) ## Compile examples/kubeflow-pipelines/*.py
+	$(PY) examples/kubeflow-pipelines/hello_pipeline.py
+	$(PY) examples/kubeflow-pipelines/gpu_pipeline.py
+
+lint: $(PY) ## ruff + yamllint + shellcheck (same as CI)
+	$(VENV)/bin/ruff check .
+	$(VENV)/bin/yamllint -c .yamllint.yaml .
+	shellcheck -s sh platform/*.sh deploy/*.sh
+
+# --- Access -------------------------------------------------------------------
+
+port-forward-dashboard: ## Central Dashboard on http://localhost:8080
+	kubectl -n istio-system port-forward svc/istio-ingressgateway 8080:80
+
+port-forward-kfp: ## Pipelines API/UI on http://localhost:8888
+	kubectl -n kubeflow port-forward svc/ml-pipeline-ui 8888:80
+
+port-forward-mlflow: ## MLflow UI on http://localhost:5000
+	kubectl -n cv-lab port-forward svc/mlflow 5000:5000
+
+port-forward-predictor: ## KServe predictor on http://localhost:8080
+	kubectl -n cv-lab port-forward svc/yolov8-coco128-predictor 8080:80
+
+# --- Optional: OpenTofu-managed lab layer (alternative to `make deploy`) ------
+
+tofu-init: ## tofu init (needs tofu/backend.conf)
 	tofu -chdir=$(TOFU_DIR) init -backend-config=backend.conf
 
-tofu-plan:
+tofu-plan: ## tofu plan (needs tofu/tofu.tfvars)
 	tofu -chdir=$(TOFU_DIR) plan -var-file=tofu.tfvars
 
-tofu-apply:
+tofu-apply: ## tofu apply
 	tofu -chdir=$(TOFU_DIR) apply -var-file=tofu.tfvars
 
-tofu-destroy:
+tofu-destroy: ## tofu destroy
 	tofu -chdir=$(TOFU_DIR) destroy -var-file=tofu.tfvars
 
-# ---------------------------------------------------------------------------
-# Cleanup
-# ---------------------------------------------------------------------------
-
-clean:
-	rm -rf $(VENV) pipeline/pipeline.yaml
+clean: ## Remove the virtualenv
+	rm -rf $(VENV)

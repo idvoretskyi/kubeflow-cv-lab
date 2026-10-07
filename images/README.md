@@ -1,22 +1,18 @@
 # images/
 
-Container images that must be built and pushed.
-
 ## serving/
 
-KServe custom predictor wrapping Ultralytics YOLOv8. Published to
-`ghcr.io/idvoretskyi/kubeflow-cv-lab-serving`.
+KServe custom predictor that wraps Ultralytics YOLO, published as
+`ghcr.io/idvoretskyi/kubeflow-cv-lab-serving` (`:latest` and `:<git-sha>`).
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | CPU-only image: `python:3.11-slim` + CPU torch + ultralytics + kserve |
-| `server.py` | `kserve.Model` subclass — loads weights from MLflow, serves V1 predict API |
-| `requirements.txt` | `ultralytics`, `kserve>=0.13,<0.17`, `mlflow==2.22.0`, `Pillow` |
+| `Dockerfile` | `python:3.12-slim` + CPU-only PyTorch 2.14.1, runs as non-root |
+| `server.py` | `kserve.Model` subclass that loads weights from MLflow and serves the V1 predict API |
+| `requirements.txt` | `ultralytics==8.4.174`, `kserve>=0.18,<0.19`, `mlflow-skinny==3.17.0`, `Pillow` |
 
-The image is built and pushed automatically by
-`.github/workflows/build-serving.yml` on every push that touches
-`images/serving/**`.
+`.github/workflows/build-serving.yml` builds the image on every PR that touches
+`images/serving/**` and pushes it from `main`.
 
-The trainer step needs **no** custom image — it uses `ultralytics/ultralytics`
-directly as a KFP `base_image`. The MLflow server uses the official
-`ghcr.io/mlflow/mlflow` image with drivers installed at pod start.
+No other custom images exist. Training uses `ultralytics/ultralytics` as a KFP
+`base_image`, and MLflow uses the official `ghcr.io/mlflow/mlflow` image.

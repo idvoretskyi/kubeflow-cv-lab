@@ -10,12 +10,6 @@ variable "kubernetes_context" {
   default     = ""
 }
 
-variable "namespace" {
-  description = "Kubernetes namespace for cv-lab resources (MLflow, Postgres)."
-  type        = string
-  default     = "cv-lab"
-}
-
 variable "postgres_storage_class" {
   description = <<-EOT
     StorageClass name for the Postgres PVC.

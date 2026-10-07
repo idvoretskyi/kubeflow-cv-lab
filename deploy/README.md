@@ -1,73 +1,42 @@
 # deploy/
 
-Cluster manifests for the `cv-lab` lab namespace (kustomize).
-
-## Structure
-
-```text
-deploy/
-├── profile.yaml                        # Kubeflow Profile CR → creates cv-lab namespace
-├── cluster/
-│   └── networkpolicy-seaweedfs.yaml    # Only change to the kubeflow namespace: allow cv-lab → seaweedfs:8333
-├── postgres/
-│   ├── pvc.yaml                        # 10 Gi PVC (cloud-neutral; set storageClass via Tofu or kustomize patch)
-│   ├── deployment.yaml                 # postgres:16-alpine
-│   ├── service.yaml
-│   └── secret.example.yaml            # Copy to secret.yaml and fill in passwords
-├── mlflow/
-│   ├── deployment.yaml                 # ghcr.io/mlflow/mlflow, --serve-artifacts, s3://mlflow backend
-│   ├── service.yaml
-│   └── create-bucket-job.yaml         # One-shot Job: creates the mlflow S3 bucket
-└── kustomization.yaml
-```
-
-## Option A — Tofu-managed (recommended)
+The lab layer (`cv-lab` namespace): PostgreSQL + MLflow with proxied artifacts
+stored in Kubeflow's SeaweedFS.
 
 ```bash
-cd tofu
-cp backend.conf.example backend.conf   # fill in Linode OBJ keys
-cp tofu.tfvars.example tofu.tfvars     # set postgres_storage_class for your cluster
-tofu init -backend-config=backend.conf
-tofu apply -var-file=tofu.tfvars
+make bootstrap            # once: Profile + Secrets (deploy/bootstrap.sh, idempotent)
+make deploy               # kubectl apply -k deploy/ and wait for rollouts
+make deploy OVERLAY=lke   # same, with linode-block-storage-retain for Postgres
 ```
 
-Secrets and the Profile CR are applied separately (see Option B steps 1–2).
+## Layout
 
-## Option B — kubectl / kustomize
+| Path | Purpose |
+|---|---|
+| `bootstrap.sh` | Applies `profile.yaml` (owner `$KF_PROFILE_OWNER`, default `user@example.com`). Creates `postgres-credentials` with a random password once. Copies the SeaweedFS keys from `kubeflow/mlpipeline-minio-artifact` into `seaweedfs-s3-credentials`. |
+| `profile.yaml` | Kubeflow `Profile` that creates the `cv-lab` namespace |
+| `base/cluster/networkpolicy-seaweedfs.yaml` | The only addition to the `kubeflow` namespace: allows `cv-lab` → SeaweedFS `:8333` |
+| `base/postgres/` | PostgreSQL 18 Deployment, Service, and 10 Gi PVC (default StorageClass) |
+| `base/mlflow/` | MLflow 3.17 server (`--serve-artifacts --artifacts-destination s3://mlflow`) |
+| `overlays/lke/` | Linode LKE: retained block storage for Postgres |
+
+MLflow's `setup` init container is idempotent. It installs the Postgres and S3
+drivers into a shared `emptyDir` (no custom image), creates the `mlflow` bucket
+if it is missing, and runs `mlflow db upgrade`.
+
+## Sizing
+
+| Pod | Requests | Limit |
+|---|---|---|
+| postgres | 100m / 256 Mi | 512 Mi |
+| mlflow | 200m / 512 Mi | 1.5 Gi |
+
+Both tolerate the GPU taint so they can use spare capacity on the GPU node of
+the two-node reference cluster. Neither requests a GPU.
+
+## Verify
 
 ```bash
-# 1. Create the Profile (namespace + RBAC)
-kubectl apply -f deploy/profile.yaml
-
-# 2. Apply real secrets (not committed — copy from examples)
-cp secrets/seaweedfs-s3-credentials.example.yaml secrets/seaweedfs-s3-credentials.yaml
-cp deploy/postgres/secret.example.yaml deploy/postgres/secret.yaml
-# edit both files with real values, then:
-kubectl apply -f secrets/seaweedfs-s3-credentials.yaml
-kubectl apply -f secrets/roboflow-api-key.yaml   # your real key
-kubectl apply -f deploy/postgres/secret.yaml
-
-# 3. Apply remaining manifests
-kubectl apply -k deploy/
-
-# 4. Create the mlflow S3 bucket (once)
-kubectl apply -f deploy/mlflow/create-bucket-job.yaml
-kubectl wait --for=condition=complete job/mlflow-create-bucket -n cv-lab --timeout=120s
-
-# 5. Verify
-kubectl rollout status deployment/postgres -n cv-lab
-kubectl rollout status deployment/mlflow -n cv-lab
-kubectl port-forward svc/mlflow 5000:5000 -n cv-lab
-# open http://localhost:5000
+kubectl -n cv-lab get pods
+make port-forward-mlflow   # http://localhost:5000
 ```
-
-## Notes
-
-- Postgres and MLflow pods have `sidecar.istio.io/inject: "false"` — they sit
-  outside the Istio mesh so mTLS complexity is avoided.
-- The `seaweedfs-s3-credentials` Secret is namespace-scoped to `cv-lab`; it is
-  never read cross-namespace.
-- `deploy/postgres/secret.yaml` and `secrets/*.yaml` are git-ignored.
-- `deploy/postgres/pvc.yaml` omits `storageClassName` so it works on any cluster.
-  Set `postgres_storage_class = "linode-block-storage-retain"` in `tofu/tofu.tfvars`
-  for Akamai LKE to ensure volume persistence across node replacements.

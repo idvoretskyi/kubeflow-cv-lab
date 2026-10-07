@@ -1,6 +1,6 @@
-#!/usr/bin/env sh
-# install.sh — Install the full Kubeflow Platform from the upstream kustomize
-# manifests onto any GPU-enabled Kubernetes cluster.
+#!/bin/sh
+# install.sh — Install Kubeflow from the upstream kustomize manifests onto any
+# GPU-enabled Kubernetes cluster (minimal lab profile by default).
 #
 # Kubeflow's supported install is to apply `kustomize build example` repeatedly
 # until the cluster converges (CRDs must be established before the resources
@@ -11,7 +11,15 @@
 #
 # Configuration (environment variables, highest priority first):
 #
-#   KF_VERSION            - kubeflow/manifests git tag (default: 26.03)
+#   KF_VERSION            - kubeflow/manifests git tag (default: 26.03.1)
+#
+#   KF_PROFILE            - minimal (default): cert-manager, Istio, Dex,
+#                           oauth2-proxy, Central Dashboard, Profiles,
+#                           Pipelines (+SeaweedFS), Trainer v2 and KServe in
+#                           Standard (raw Deployment) mode, with trimmed
+#                           requests. Fits the 2-node reference cluster.
+#                           full: upstream `example` unchanged (adds Knative,
+#                           Katib, Notebooks, Spark, Model Registry, ...).
 #
 #   KF_GPU_TOLERATION_KEY - taint key to tolerate on GPU nodes
 #                           (default: nvidia.com/gpu; set to "" to skip)
@@ -46,15 +54,29 @@
 #
 # Usage:
 #   ./platform/install.sh
-#   KF_VERSION=26.03 KF_WEBHOOK_ACCESS=open ./platform/install.sh
+#   KF_PROFILE=full KF_WEBHOOK_ACCESS=open ./platform/install.sh
 #   PRESET=lke make platform-install    # sources platform/presets/lke.env
 
 set -eu
 
 # ---------------------------------------------------------------------------
-# Source preset then config.env (CLI env wins over both).
+# Source preset then config.env; explicitly supplied environment values win.
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Preserve caller-provided values before either file can override them.
+CLI_KF_VERSION_SET=${KF_VERSION+x}
+CLI_KF_VERSION=${KF_VERSION-}
+CLI_KF_PROFILE_SET=${KF_PROFILE+x}
+CLI_KF_PROFILE=${KF_PROFILE-}
+CLI_KF_GPU_TOLERATION_KEY_SET=${KF_GPU_TOLERATION_KEY+x}
+CLI_KF_GPU_TOLERATION_KEY=${KF_GPU_TOLERATION_KEY-}
+CLI_KF_WEBHOOK_ACCESS_SET=${KF_WEBHOOK_ACCESS+x}
+CLI_KF_WEBHOOK_ACCESS=${KF_WEBHOOK_ACCESS-}
+CLI_KF_APISERVER_CIDRS_SET=${KF_APISERVER_CIDRS+x}
+CLI_KF_APISERVER_CIDRS=${KF_APISERVER_CIDRS-}
+CLI_KF_POD_CIDR_SET=${KF_POD_CIDR+x}
+CLI_KF_POD_CIDR=${KF_POD_CIDR-}
 
 if [ -n "${PRESET:-}" ]; then
   PRESET_FILE="${SCRIPT_DIR}/presets/${PRESET}.env"
@@ -74,10 +96,24 @@ if [ -f "${SCRIPT_DIR}/config.env" ]; then
   . "${SCRIPT_DIR}/config.env"
 fi
 
+if [ -n "${CLI_KF_VERSION_SET}" ]; then KF_VERSION=${CLI_KF_VERSION}; fi
+if [ -n "${CLI_KF_PROFILE_SET}" ]; then KF_PROFILE=${CLI_KF_PROFILE}; fi
+if [ -n "${CLI_KF_GPU_TOLERATION_KEY_SET}" ]; then
+  KF_GPU_TOLERATION_KEY=${CLI_KF_GPU_TOLERATION_KEY}
+fi
+if [ -n "${CLI_KF_WEBHOOK_ACCESS_SET}" ]; then
+  KF_WEBHOOK_ACCESS=${CLI_KF_WEBHOOK_ACCESS}
+fi
+if [ -n "${CLI_KF_APISERVER_CIDRS_SET}" ]; then
+  KF_APISERVER_CIDRS=${CLI_KF_APISERVER_CIDRS}
+fi
+if [ -n "${CLI_KF_POD_CIDR_SET}" ]; then KF_POD_CIDR=${CLI_KF_POD_CIDR}; fi
+
 # ---------------------------------------------------------------------------
 # Defaults — use the no-colon form so an explicit "" disables the feature.
 # ---------------------------------------------------------------------------
-KF_VERSION="${KF_VERSION-26.03}"
+KF_VERSION="${KF_VERSION-26.03.1}"
+KF_PROFILE="${KF_PROFILE-minimal}"
 KF_GPU_TOLERATION_KEY="${KF_GPU_TOLERATION_KEY-nvidia.com/gpu}"
 KF_WEBHOOK_ACCESS="${KF_WEBHOOK_ACCESS-auto}"
 # KF_APISERVER_CIDRS and KF_POD_CIDR have no built-in defaults;
@@ -100,6 +136,7 @@ if ! kubectl cluster-info > /dev/null 2>&1; then
 fi
 
 echo "Installing Kubeflow ${KF_VERSION} …"
+echo "  Profile            : ${KF_PROFILE}"
 echo "  GPU toleration key : ${KF_GPU_TOLERATION_KEY:-<disabled>}"
 echo "  Webhook access     : ${KF_WEBHOOK_ACCESS}"
 echo ""
@@ -121,35 +158,124 @@ git clone --depth 1 --branch "${KF_VERSION}" \
 cd "${WORKDIR}/manifests"
 
 # ---------------------------------------------------------------------------
-# Build a kustomize overlay on top of the upstream example.
+# Build a kustomize overlay on top of the upstream manifests (KF_PROFILE).
 #
-# The overlay adds an optional GPU toleration patch to every Deployment and
-# StatefulSet so Kubeflow control-plane pods can land on tainted GPU nodes.
+# Optionally (KF_GPU_TOLERATION_KEY) every Deployment/StatefulSet tolerates the
+# GPU taint so control-plane pods may use spare CPU/RAM on GPU nodes — required
+# on the reference cluster whose only CPU node has 4 GB.
 # ---------------------------------------------------------------------------
 OVERLAY="${WORKDIR}/manifests/overlay"
 mkdir -p "${OVERLAY}"
+PATCHES=""
 
-TOLERATION_PATCHES=""
-if [ -n "${KF_GPU_TOLERATION_KEY}" ]; then
-  echo "Creating GPU toleration patches (key=${KF_GPU_TOLERATION_KEY}) …"
+# add_patch <file> <kind> [name] — register a strategic-merge patch file.
+add_patch() {
+  PATCHES="${PATCHES}
+  - path: $1
+    target:
+      kind: $2"
+  if [ -n "${3:-}" ]; then
+    PATCHES="${PATCHES}
+      name: $3"
+  fi
+}
 
-  cat > "${OVERLAY}/deploy-toleration.yaml" <<EOF
+# requests_patch <kind> <namespace> <name> <container> <cpu> <memory>
+requests_patch() {
+  f="req-$3.yaml"
+  cat > "${OVERLAY}/${f}" <<EOF
+apiVersion: apps/v1
+kind: $1
+metadata:
+  name: $3
+  namespace: $2
+spec:
+  template:
+    spec:
+      containers:
+        - name: $4
+          resources:
+            requests:
+              cpu: $5
+              memory: $6
+EOF
+  add_patch "${f}" "$1" "$3"
+}
+
+# scale_to_zero <name> — upstream Deployment the lab does not use.
+scale_to_zero() {
+  f="zero-$1.yaml"
+  cat > "${OVERLAY}/${f}" <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: placeholder
+  name: $1
 spec:
-  template:
-    spec:
-      tolerations:
-        - key: "${KF_GPU_TOLERATION_KEY}"
-          operator: "Exists"
-          effect: "NoSchedule"
+  replicas: 0
 EOF
+  add_patch "${f}" Deployment "$1"
+}
 
-  cat > "${OVERLAY}/sts-toleration.yaml" <<EOF
+case "${KF_PROFILE}" in
+  full)
+    RESOURCES="  - ../example"
+    ;;
+  minimal)
+    RESOURCES="  - ../common/cert-manager/base
+  - ../common/cert-manager/overlays/kubeflow
+  - ../common/istio/istio-crds/base
+  - ../common/istio/istio-namespace/base
+  - ../common/istio/istio-install/overlays/oauth2-proxy
+  - ../common/oauth2-proxy/overlays/m2m-dex-only
+  - ../common/dex/overlays/oauth2-proxy
+  - ../common/kubeflow-namespace/base
+  - ../common/kubeflow-roles/base
+  - ../common/istio/kubeflow-istio-resources/base
+  - ../applications/pipeline/overlays
+  - ../applications/dashboard/overlays/istio
+  - ../applications/trainer/overlays
+  - ../common/user-namespace/base
+  - ../applications/kserve/kserve"
+
+    # Trim the largest upstream requests (limits are untouched) so the control
+    # plane fits next to the lab on the 2-node reference cluster.
+    requests_patch Deployment istio-system istiod discovery 100m 512Mi
+    requests_patch Deployment kubeflow mysql mysql 100m 512Mi
+    requests_patch Deployment kubeflow ml-pipeline ml-pipeline-api-server 100m 256Mi
+    requests_patch Deployment kubeflow ml-pipeline-persistenceagent ml-pipeline-persistenceagent 50m 128Mi
+    requests_patch Deployment kubeflow ml-pipeline-visualizationserver ml-pipeline-visualizationserver 10m 128Mi
+    requests_patch Deployment kubeflow workflow-controller workflow-controller 50m 256Mi
+    requests_patch Deployment kubeflow-system jobset-controller-manager manager 100m 128Mi
+
+    # KServe LLM / local-model-cache controllers are not used by the lab.
+    scale_to_zero llmisvc-controller-manager
+    scale_to_zero kserve-localmodel-controller-manager
+
+    # No Knative in this profile: KServe defaults to plain Deployments.
+    cat > "${OVERLAY}/kserve-standard.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inferenceservice-config
+  namespace: kubeflow
+data:
+  deploy: |-
+    {"defaultDeploymentMode": "Standard"}
+EOF
+    add_patch kserve-standard.yaml ConfigMap inferenceservice-config
+    ;;
+  *)
+    echo "Error: unknown KF_PROFILE '${KF_PROFILE}' (valid: minimal, full)." >&2
+    exit 1
+    ;;
+esac
+
+if [ -n "${KF_GPU_TOLERATION_KEY}" ]; then
+  echo "Adding GPU taint toleration (key=${KF_GPU_TOLERATION_KEY}) to all workloads …"
+  for kind in Deployment StatefulSet; do
+    cat > "${OVERLAY}/tolerate-${kind}.yaml" <<EOF
 apiVersion: apps/v1
-kind: StatefulSet
+kind: ${kind}
 metadata:
   name: placeholder
 spec:
@@ -160,27 +286,24 @@ spec:
           operator: "Exists"
           effect: "NoSchedule"
 EOF
-
-  TOLERATION_PATCHES='
-patches:
-  - path: deploy-toleration.yaml
-    target:
-      kind: Deployment
-  - path: sts-toleration.yaml
-    target:
-      kind: StatefulSet'
+    add_patch "tolerate-${kind}.yaml" "${kind}"
+  done
 fi
 
-cat > "${OVERLAY}/kustomization.yaml" <<EOF
-resources:
-  - ../example
-${TOLERATION_PATCHES}
-EOF
+{
+  echo "apiVersion: kustomize.config.k8s.io/v1beta1"
+  echo "kind: Kustomization"
+  echo "resources:"
+  echo "${RESOURCES}"
+  if [ -n "${PATCHES}" ]; then
+    echo "patches:${PATCHES}"
+  fi
+} > "${OVERLAY}/kustomization.yaml"
 
 # ---------------------------------------------------------------------------
 # Apply loop — convergence may take multiple passes as CRDs register.
 # ---------------------------------------------------------------------------
-echo "Applying Kubeflow manifests (full platform; this can take 10–20 minutes) …"
+echo "Applying Kubeflow manifests (profile: ${KF_PROFILE}; this can take 10–20 minutes) …"
 attempt=1
 max_attempts=30
 until kustomize build "${OVERLAY}" | kubectl apply --server-side --force-conflicts -f -; do

@@ -1,0 +1,17 @@
+# Lab layer (base): MLflow (tracking + proxied artifacts) backed by Postgres + SeaweedFS.
+# Prerequisites (created by `make bootstrap`): the cv-lab Profile/namespace and
+# the `postgres-credentials` + `seaweedfs-s3-credentials` Secrets.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: kubeflow-cv-lab
+
+resources:
+  - cluster/networkpolicy-seaweedfs.yaml
+  - postgres/pvc.yaml
+  - postgres/deployment.yaml
+  - postgres/service.yaml
+  - mlflow/deployment.yaml
+  - mlflow/service.yaml
