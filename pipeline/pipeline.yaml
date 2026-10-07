@@ -104,8 +104,8 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.11.1'\
-          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.17.0'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -131,10 +131,19 @@ deploymentSpec:
           ), recursive=True\n        )\n        best_pt = candidates[0] if candidates\
           \ else best_pt\n\n    model = YOLO(best_pt)\n    results = model.val(data=data_yaml)\n\
           \    map50_95 = float(results.box.map)\n    map50 = float(results.box.map50)\n\
-          \    print(f\"mAP50: {map50:.4f}  mAP50-95: {map50_95:.4f}\")\n\n    with\
-          \ mlflow.start_run(run_id=run_id):\n        mlflow.log_metrics({\"val/mAP50\"\
-          : map50, \"val/mAP50-95\": map50_95})\n\n    return map50_95\n\n"
-        image: ultralytics/ultralytics:latest
+          \    print(f\"mAP50: {map50:.4f}  mAP50-95: {map50_95:.4f}\")\n\n    # Log\
+          \ straight to the training run (no active-run/experiment state needed).\n\
+          \    client = mlflow.MlflowClient()\n    client.log_metric(run_id, \"val/mAP50\"\
+          , map50)\n    client.log_metric(run_id, \"val/mAP50-95\", map50_95)\n\n\
+          \    return map50_95\n\n"
+        image: ultralytics/ultralytics:8.4.174
+        resources:
+          cpuRequest: 1.0
+          memoryLimit: 4.294967296
+          memoryRequest: 2.147483648
+          resourceCpuRequest: '1'
+          resourceMemoryLimit: 4Gi
+          resourceMemoryRequest: 2Gi
     exec-load-data:
       container:
         args:
@@ -148,7 +157,7 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'requests' 'pyyaml'\
-          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -208,7 +217,7 @@ deploymentSpec:
           \ as f:\n        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)\n\
           \n    print(f\"data.yaml patched: path={dataset_root}\")\n    print(f\"\
           Dataset ready at {out_dir}\")\n\n"
-        image: python:3.11-slim
+        image: python:3.12-slim
     exec-register:
       container:
         args:
@@ -221,10 +230,10 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.11.1'\
-          \ 'boto3'  &&  python3 -m pip install --quiet --no-warn-script-location\
-          \ 'kfp==2.16.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
-          3.9\"' && \"$0\" \"$@\"\n"
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.17.0'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -238,10 +247,13 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef register(\n    run_id: str,\n    registered_model_name: str,\n\
           \    mlflow_tracking_uri: str,\n    map50_95: float,\n) -> str:\n    \"\"\
-          \"Register the trained model in the MLflow Model Registry.\"\"\"\n    import\
-          \ mlflow\n    from mlflow import MlflowClient\n\n    mlflow.set_tracking_uri(mlflow_tracking_uri)\n\
-          \    client = MlflowClient()\n\n    # MLflow 3.x removed the LoggedModel\
-          \ lookup from mlflow.register_model()\n    # for runs:/ URIs unless mlflow.log_model()\
+          \"Register the model, tag it with mAP50-95 and move the ``champion`` alias.\n\
+          \n    KServe serves ``models:/<name>@champion``, so every successful run\
+          \ is\n    picked up on the next predictor restart without editing manifests.\n\
+          \    \"\"\"\n    import time\n\n    import mlflow\n    from mlflow import\
+          \ MlflowClient\n\n    mlflow.set_tracking_uri(mlflow_tracking_uri)\n   \
+          \ client = MlflowClient()\n\n    # MLflow 3.x removed the LoggedModel lookup\
+          \ from mlflow.register_model()\n    # for runs:/ URIs unless mlflow.log_model()\
           \ was used during training.\n    # Use MlflowClient.create_model_version()\
           \ directly with the artifact URI\n    # so that any artifact logged via\
           \ mlflow.log_artifacts() can be registered.\n    run = client.get_run(run_id)\n\
@@ -250,15 +262,15 @@ deploymentSpec:
           \ mlflow.exceptions.MlflowException:\n        pass  # model already exists\
           \ \u2014 create a new version below\n\n    mv = client.create_model_version(\n\
           \        name=registered_model_name,\n        source=artifact_uri,\n   \
-          \     run_id=run_id,\n    )\n\n    # Wait for the version to become READY\n\
-          \    import time\n    for _ in range(30):\n        mv = client.get_model_version(registered_model_name,\
+          \     run_id=run_id,\n    )\n\n    for _ in range(30):\n        mv = client.get_model_version(registered_model_name,\
           \ mv.version)\n        if mv.status == \"READY\":\n            break\n \
           \       time.sleep(2)\n\n    print(f\"Registered: {registered_model_name}\
           \ v{mv.version}  (run {run_id})\")\n    print(f\"mAP50-95: {map50_95:.4f}\"\
           )\n\n    client.set_model_version_tag(\n        registered_model_name, str(mv.version),\
-          \ \"mAP50-95\", f\"{map50_95:.4f}\"\n    )\n\n    return f\"models:/{registered_model_name}/{mv.version}\"\
+          \ \"mAP50-95\", f\"{map50_95:.4f}\"\n    )\n    client.set_registered_model_alias(registered_model_name,\
+          \ \"champion\", str(mv.version))\n\n    return f\"models:/{registered_model_name}/{mv.version}\"\
           \n\n"
-        image: python:3.11-slim
+        image: python:3.12-slim
     exec-train:
       container:
         args:
@@ -271,8 +283,8 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.11.1'\
-          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'mlflow==3.17.0'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -303,8 +315,8 @@ deploymentSpec:
           \ as run:\n        model = YOLO(model_variant)\n        model.train(\n \
           \           data=data_yaml,\n            epochs=epochs,\n            imgsz=imgsz,\n\
           \            project=model_dir.path,\n            name=\"train\",\n    \
-          \        exist_ok=True,\n            workers=0,  # disable DataLoader multiprocessing\
-          \ (avoids /dev/shm exhaustion in K8s)\n        )\n        run_id = run.info.run_id\n\
+          \        exist_ok=True,\n            workers=2,  # /dev/shm is a 2 GiB memory-backed\
+          \ emptyDir (see pipeline)\n        )\n        run_id = run.info.run_id\n\
           \n    # Copy best.pt to the canonical model_dir root so downstream steps\
           \ find it.\n    best_candidates = glob.glob(\n        os.path.join(model_dir.path,\
           \ \"**\", \"best.pt\"), recursive=True\n    )\n    if best_candidates:\n\
@@ -313,13 +325,19 @@ deploymentSpec:
           \ dest)\n        print(f\"best.pt \u2192 {dest}\")\n    else:\n        print(\"\
           WARNING: best.pt not found in train output\")\n\n    print(f\"MLflow run_id:\
           \ {run_id}\")\n    return run_id\n\n"
-        image: ultralytics/ultralytics:latest
+        image: ultralytics/ultralytics:8.4.174
         resources:
           accelerator:
             count: '1'
             resourceCount: '1'
             resourceType: nvidia.com/gpu
             type: nvidia.com/gpu
+          cpuRequest: 2.0
+          memoryLimit: 12.884901888
+          memoryRequest: 6.442450944
+          resourceCpuRequest: '2'
+          resourceMemoryLimit: 12Gi
+          resourceMemoryRequest: 6Gi
 pipelineInfo:
   description: "Dataset download \u2192 YOLOv8 GPU training \u2192 MLflow tracking\
     \ & registry \u2192 model URI for KServe serving."
@@ -452,7 +470,7 @@ root:
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0
-sdkVersion: kfp-2.16.1
+sdkVersion: kfp-2.17.0
 ---
 platforms:
   kubernetes:
@@ -474,6 +492,11 @@ platforms:
             key: nvidia.com/gpu
             operator: Exists
         exec-train:
+          emptyDirMounts:
+          - medium: Memory
+            mountPath: /dev/shm
+            sizeLimit: 2Gi
+            volumeName: dshm
           nodeSelector:
             labels:
               nvidia.com/gpu.present: 'true'

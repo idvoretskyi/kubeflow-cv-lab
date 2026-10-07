@@ -10,17 +10,12 @@ Stages
 Default dataset: COCO128 (128-image COCO subset, ultralytics CDN).
 Override via the ``dataset_url`` pipeline parameter.
 
-GPU scheduling (mirrors examples/kubeflow-pipelines/gpu_pipeline.py):
-  * set_accelerator_type / set_accelerator_limit  — hard placement guarantee
-  * add_toleration                                — tolerate nvidia.com/gpu taint
-  * add_node_selector                             — GFD label nvidia.com/gpu.present=true
+GPU scheduling follows the shared contract in ``gpu_scheduling.py``
+(see that module for the compile-time env overrides). Pinned runtime versions
+live in ``versions.py``.
 
-Override env vars at compile time for a different cluster:
-  GPU_NODE_SELECTOR_KEY   (default: nvidia.com/gpu.present)
-  GPU_NODE_SELECTOR_VALUE (default: true)
-  GPU_TAINT_KEY           (default: nvidia.com/gpu)
-  GPU_TAINT_EFFECT        (default: NoSchedule)
-  GPU_NODE_SELECTOR_KEY="" to disable the node selector.
+Sized for the reference cluster: one RTX 4000 Ada node with 4 vCPU / 16 GB
+(Linode ``g2-gpu-rtx4000a1-s``).
 
 Compile:
     python pipeline/pipeline.py    # writes pipeline/pipeline.yaml
@@ -28,59 +23,21 @@ Or:
     make compile
 """
 
-import os
+import pathlib
 
-from kfp import compiler, dsl
-from kfp import kubernetes
+from kfp import compiler, dsl, kubernetes
 
-# ---------------------------------------------------------------------------
-# GPU scheduling config (env-overridable; no cloud-specific literals)
-# ---------------------------------------------------------------------------
-GPU_NODE_SELECTOR_KEY = os.environ.get("GPU_NODE_SELECTOR_KEY", "nvidia.com/gpu.present")
-GPU_NODE_SELECTOR_VALUE = os.environ.get("GPU_NODE_SELECTOR_VALUE", "true")
-GPU_TAINT_KEY = os.environ.get("GPU_TAINT_KEY", "nvidia.com/gpu")
-GPU_TAINT_EFFECT = os.environ.get("GPU_TAINT_EFFECT", "NoSchedule")
+from gpu_scheduling import cpu_task, gpu_task
+from versions import MLFLOW_VERSION, PYTHON_IMAGE, ULTRALYTICS_IMAGE
 
-# ---------------------------------------------------------------------------
-# Component images
-# ---------------------------------------------------------------------------
-_ULTRALYTICS = "ultralytics/ultralytics:latest"
-_PYTHON = "python:3.11-slim"
-
-
-# ---------------------------------------------------------------------------
-# GPU scheduling helper
-# ---------------------------------------------------------------------------
-def _apply_gpu_scheduling(task: dsl.PipelineTask, *, require_gpu: bool = False) -> None:
-    """Apply GPU scheduling constraints to a KFP task.
-
-    When ``require_gpu=True``: requests the GPU resource (accelerator type +
-    limit = 1), adds the taint toleration, and (if ``GPU_NODE_SELECTOR_KEY`` is
-    set) adds the GFD node selector.
-
-    When ``require_gpu=False``: adds only the taint toleration so the task can
-    be scheduled on GPU nodes when the system pool is at capacity — without
-    consuming a GPU resource slot.
-    """
-    if require_gpu:
-        task.set_accelerator_type("nvidia.com/gpu")
-        task.set_accelerator_limit(1)
-    kubernetes.add_toleration(
-        task, key=GPU_TAINT_KEY, operator="Exists", effect=GPU_TAINT_EFFECT
-    )
-    if require_gpu and GPU_NODE_SELECTOR_KEY:
-        kubernetes.add_node_selector(
-            task,
-            label_key=GPU_NODE_SELECTOR_KEY,
-            label_value=GPU_NODE_SELECTOR_VALUE,
-        )
+_MLFLOW = f"mlflow=={MLFLOW_VERSION}"
 
 
 # ---------------------------------------------------------------------------
 # Step 1: load_data
 # ---------------------------------------------------------------------------
 @dsl.component(
-    base_image=_PYTHON,
+    base_image=PYTHON_IMAGE,
     packages_to_install=["requests", "pyyaml"],
 )
 def load_data(
@@ -171,8 +128,8 @@ def load_data(
 # Step 2: train
 # ---------------------------------------------------------------------------
 @dsl.component(
-    base_image=_ULTRALYTICS,
-    packages_to_install=["mlflow==3.11.1"],
+    base_image=ULTRALYTICS_IMAGE,
+    packages_to_install=[_MLFLOW],
 )
 def train(
     dataset: dsl.Input[dsl.Dataset],
@@ -214,7 +171,7 @@ def train(
             project=model_dir.path,
             name="train",
             exist_ok=True,
-            workers=0,  # disable DataLoader multiprocessing (avoids /dev/shm exhaustion in K8s)
+            workers=2,  # /dev/shm is a 2 GiB memory-backed emptyDir (see pipeline)
         )
         run_id = run.info.run_id
 
@@ -238,8 +195,8 @@ def train(
 # Step 3: evaluate
 # ---------------------------------------------------------------------------
 @dsl.component(
-    base_image=_ULTRALYTICS,
-    packages_to_install=["mlflow==3.11.1"],
+    base_image=ULTRALYTICS_IMAGE,
+    packages_to_install=[_MLFLOW],
 )
 def evaluate(
     dataset: dsl.Input[dsl.Dataset],
@@ -272,8 +229,10 @@ def evaluate(
     map50 = float(results.box.map50)
     print(f"mAP50: {map50:.4f}  mAP50-95: {map50_95:.4f}")
 
-    with mlflow.start_run(run_id=run_id):
-        mlflow.log_metrics({"val/mAP50": map50, "val/mAP50-95": map50_95})
+    # Log straight to the training run (no active-run/experiment state needed).
+    client = mlflow.MlflowClient()
+    client.log_metric(run_id, "val/mAP50", map50)
+    client.log_metric(run_id, "val/mAP50-95", map50_95)
 
     return map50_95
 
@@ -282,8 +241,8 @@ def evaluate(
 # Step 4: register
 # ---------------------------------------------------------------------------
 @dsl.component(
-    base_image=_PYTHON,
-    packages_to_install=["mlflow==3.11.1", "boto3"],
+    base_image=PYTHON_IMAGE,
+    packages_to_install=[_MLFLOW],
 )
 def register(
     run_id: str,
@@ -291,7 +250,13 @@ def register(
     mlflow_tracking_uri: str,
     map50_95: float,
 ) -> str:
-    """Register the trained model in the MLflow Model Registry."""
+    """Register the model, tag it with mAP50-95 and move the ``champion`` alias.
+
+    KServe serves ``models:/<name>@champion``, so every successful run is
+    picked up on the next predictor restart without editing manifests.
+    """
+    import time
+
     import mlflow
     from mlflow import MlflowClient
 
@@ -316,8 +281,6 @@ def register(
         run_id=run_id,
     )
 
-    # Wait for the version to become READY
-    import time
     for _ in range(30):
         mv = client.get_model_version(registered_model_name, mv.version)
         if mv.status == "READY":
@@ -330,6 +293,7 @@ def register(
     client.set_model_version_tag(
         registered_model_name, str(mv.version), "mAP50-95", f"{map50_95:.4f}"
     )
+    client.set_registered_model_alias(registered_model_name, "champion", str(mv.version))
 
     return f"models:/{registered_model_name}/{mv.version}"
 
@@ -357,56 +321,51 @@ def yolov8_pipeline(
     experiment_name: str = "coco128-yolov8",
     registered_model_name: str = "yolov8-coco128",
 ) -> None:
-    # ------------------------------------------------------------------
-    # load_data — CPU, downloads dataset from a URL
-    # ------------------------------------------------------------------
-    load_task = load_data(dataset_url=dataset_url, dataset_yaml_url=dataset_yaml_url)
-    # System pool is at capacity; tolerate GPU taint so this pod can land on the
-    # GPU node without consuming a GPU resource slot.
-    _apply_gpu_scheduling(load_task)
-
-    # ------------------------------------------------------------------
-    # train — GPU required
-    # ------------------------------------------------------------------
-    train_task = train(
-        dataset=load_task.outputs["dataset"],
-        model_variant=model_variant,
-        epochs=epochs,
-        imgsz=imgsz,
-        mlflow_tracking_uri=mlflow_tracking_uri,
-        experiment_name=experiment_name,
+    load_task = cpu_task(
+        load_data(dataset_url=dataset_url, dataset_yaml_url=dataset_yaml_url)
     )
-    _apply_gpu_scheduling(train_task, require_gpu=True)
 
-    # ------------------------------------------------------------------
-    # evaluate — CPU (keeps the GPU free after training)
-    # ------------------------------------------------------------------
-    eval_task = evaluate(
-        dataset=load_task.outputs["dataset"],
-        model_dir=train_task.outputs["model_dir"],
-        mlflow_tracking_uri=mlflow_tracking_uri,
-        run_id=train_task.outputs["Output"],
+    train_task = gpu_task(
+        train(
+            dataset=load_task.outputs["dataset"],
+            model_variant=model_variant,
+            epochs=epochs,
+            imgsz=imgsz,
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            experiment_name=experiment_name,
+        )
     )
-    _apply_gpu_scheduling(eval_task)
+    # Fits g2-gpu-rtx4000a1-s (4 vCPU / 16 GB) next to the GPU operator daemons.
+    train_task.set_cpu_request("2").set_memory_request("6Gi").set_memory_limit("12Gi")
+    kubernetes.empty_dir_mount(
+        train_task, volume_name="dshm", mount_path="/dev/shm", medium="Memory", size_limit="2Gi"
+    )
 
-    # ------------------------------------------------------------------
-    # register — CPU
-    # ------------------------------------------------------------------
-    reg_task = register(
-        run_id=train_task.outputs["Output"],
-        registered_model_name=registered_model_name,
-        mlflow_tracking_uri=mlflow_tracking_uri,
-        map50_95=eval_task.outputs["Output"],
+    # Validation runs on CPU so the GPU is released as soon as training ends.
+    eval_task = cpu_task(
+        evaluate(
+            dataset=load_task.outputs["dataset"],
+            model_dir=train_task.outputs["model_dir"],
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            run_id=train_task.outputs["Output"],
+        )
     )
-    _apply_gpu_scheduling(reg_task)
+    eval_task.set_cpu_request("1").set_memory_request("2Gi").set_memory_limit("4Gi")
+
+    cpu_task(
+        register(
+            run_id=train_task.outputs["Output"],
+            registered_model_name=registered_model_name,
+            mlflow_tracking_uri=mlflow_tracking_uri,
+            map50_95=eval_task.outputs["Output"],
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # Compile when run directly
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    import pathlib
-
     out = pathlib.Path(__file__).parent / "pipeline.yaml"
     compiler.Compiler().compile(pipeline_func=yolov8_pipeline, package_path=str(out))
     print(f"Compiled → {out}")
