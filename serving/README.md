@@ -1,34 +1,30 @@
 # serving/
 
-KServe `InferenceService` manifests for the trained YOLOv8 model.
-
-Apply with:
+KServe `InferenceService` for the trained YOLO model. It runs in **Standard**
+(raw Deployment) mode, so it needs no Knative, and uses a CPU-only predictor.
 
 ```bash
-make serve
-# or
-kubectl apply -k serving/
+make serve                    # kubectl apply -k serving/ + wait for Ready
+make port-forward-predictor   # http://localhost:8080
 ```
-
-## Files
-
-| File | Purpose |
-|---|---|
-| `inference-service.yaml` | `InferenceService` in `cv-lab` — custom predictor loading from MLflow |
-| `kustomization.yaml` | kustomize entry point |
 
 ## Model source
 
-The predictor fetches model weights from the MLflow Model Registry at pod
-startup via `mlflow.artifacts.download_artifacts("models:/yolov8-coco128/1")`.
-MLflow proxies the artifact download over HTTP — the pod does **not** need
-direct S3 credentials.
+At startup the predictor (`images/serving/server.py`) downloads
+`models:/yolov8-coco128@champion` from MLflow over HTTP. MLflow proxies the
+artifacts, so the pod needs no S3 credentials. The pipeline's `register` step
+moves the `champion` alias. To pick up a newer model:
 
-## Inference protocol
+```bash
+kubectl -n cv-lab rollout restart deploy/yolov8-coco128-predictor
+```
 
-KServe V1 prediction protocol:
+## Inference protocol (KServe V1)
 
 ```text
 POST /v1/models/yolov8-coco128:predict
 {"instances": [{"image": {"b64": "<base64 PNG/JPEG>"}}]}
 ```
+
+The response has `predictions[]` entries with `boxes` (xyxy), `scores`,
+`class_ids` and `class_names`.
