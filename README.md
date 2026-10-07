@@ -139,16 +139,6 @@ kubeflow-cv-lab/
 Cloud-specific literals live only in `akamai-lke-gpu-cluster/tofu/locals.tf`,
 `platform/presets/lke.env` and `deploy/overlays/lke/`.
 
-## Upgrading an existing deployment
-
-- **PostgreSQL 16 → 18:** the data directory format changed. Before you run
-  `make deploy` on an existing install, dump the database (`pg_dump`) and delete
-  the old PVC, then restore. A fresh MLflow database needs no action.
-- **Tofu users:** resource addresses changed. `moved` blocks in `tofu/main.tf`
-  migrate the state automatically on the next `tofu apply`.
-- **Serving:** the predictor now loads `models:/yolov8-coco128@champion`.
-  Re-run the pipeline once, or set the alias in the MLflow UI.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).

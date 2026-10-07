@@ -36,24 +36,3 @@ resource "kubernetes_manifest" "lab" {
   depends_on = [kubernetes_manifest.postgres_pvc]
 }
 
-# State migration from the pre-refactor resource addresses.
-moved {
-  from = kubernetes_manifest.networkpolicy_seaweedfs
-  to   = kubernetes_manifest.lab["networkpolicy_seaweedfs"]
-}
-moved {
-  from = kubernetes_manifest.postgres_deployment
-  to   = kubernetes_manifest.lab["postgres_deployment"]
-}
-moved {
-  from = kubernetes_manifest.postgres_service
-  to   = kubernetes_manifest.lab["postgres_service"]
-}
-moved {
-  from = kubernetes_manifest.mlflow_deployment
-  to   = kubernetes_manifest.lab["mlflow_deployment"]
-}
-moved {
-  from = kubernetes_manifest.mlflow_service
-  to   = kubernetes_manifest.lab["mlflow_service"]
-}
