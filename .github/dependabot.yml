@@ -1,17 +1,39 @@
 version: 2
+
+# Pre-releases (rc/beta/dev) are never proposed; minor/patch bumps are grouped
+# per ecosystem to keep PR noise low. Keep MLflow on the same version across
+# pipeline/pipeline.py, deploy/mlflow/deployment.yaml and images/serving.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    labels:
-      - dependencies
-      - github-actions
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    labels: [dependencies, github-actions]
 
   - package-ecosystem: pip
-    directory: /pipeline
+    directories:
+      - /pipeline
+      - /images/serving
     schedule:
       interval: weekly
-    labels:
-      - dependencies
-      - python
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        versions: ["*rc*", "*dev*", "*alpha*", "*beta*"]
+    labels: [dependencies, python]
+
+  - package-ecosystem: docker
+    directory: /images/serving
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+    labels: [dependencies, docker]
