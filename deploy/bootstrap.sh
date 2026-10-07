@@ -69,7 +69,9 @@ else
   sk=$(kubectl -n kubeflow get secret mlpipeline-minio-artifact \
         -o jsonpath='{.data.secretkey}' | b64d)
 fi
-[ -n "${ak}" ] && [ -n "${sk}" ] || die "empty SeaweedFS credentials"
+if [ -z "${ak}" ] || [ -z "${sk}" ]; then
+  die "empty SeaweedFS credentials"
+fi
 
 kubectl -n "${NAMESPACE}" create secret generic seaweedfs-s3-credentials \
   --from-literal=AWS_ACCESS_KEY_ID="${ak}" \
