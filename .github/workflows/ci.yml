@@ -66,7 +66,7 @@ jobs:
 
       - name: Build and validate kustomizations
         run: |
-          set -eu
+          set -euo pipefail
           for k in deploy deploy/overlays/lke serving; do
             echo "::group::${k}"
             kubectl kustomize "${k}" | ./kubeconform -strict -summary \

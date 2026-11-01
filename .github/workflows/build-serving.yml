@@ -40,7 +40,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: images/serving
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
           tags: |
             ghcr.io/idvoretskyi/kubeflow-cv-lab-serving:latest
             ghcr.io/idvoretskyi/kubeflow-cv-lab-serving:${{ github.sha }}

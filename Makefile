@@ -52,18 +52,21 @@ serve: ## Deploy the KServe InferenceService (needs a registered model)
 $(PY):
 	python3 -m venv $(VENV)
 	$(PIP) install --quiet --upgrade pip
+
+$(VENV)/.requirements-installed: pipeline/requirements.txt $(PY)
 	$(PIP) install --quiet -r pipeline/requirements.txt ruff yamllint
+	touch $@
 
-venv: $(PY) ## Create the local virtualenv (KFP SDK, ruff, yamllint)
+venv: $(VENV)/.requirements-installed ## Create the local virtualenv (KFP SDK, ruff, yamllint)
 
-compile: $(PY) ## Compile pipeline/pipeline.py -> pipeline/pipeline.yaml
+compile: $(VENV)/.requirements-installed ## Compile pipeline/pipeline.py -> pipeline/pipeline.yaml
 	$(PY) pipeline/pipeline.py
 
-examples-compile: $(PY) ## Compile examples/kubeflow-pipelines/*.py
+examples-compile: $(VENV)/.requirements-installed ## Compile examples/kubeflow-pipelines/*.py
 	$(PY) examples/kubeflow-pipelines/hello_pipeline.py
 	$(PY) examples/kubeflow-pipelines/gpu_pipeline.py
 
-lint: $(PY) ## ruff + yamllint + shellcheck (same as CI)
+lint: $(VENV)/.requirements-installed ## ruff + yamllint + shellcheck (same as CI)
 	$(VENV)/bin/ruff check .
 	$(VENV)/bin/yamllint -c .yamllint.yaml .
 	shellcheck -s sh platform/*.sh deploy/*.sh

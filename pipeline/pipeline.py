@@ -352,7 +352,7 @@ def yolov8_pipeline(
     )
     eval_task.set_cpu_request("1").set_memory_request("2Gi").set_memory_limit("4Gi")
 
-    cpu_task(
+    register_task = cpu_task(
         register(
             run_id=train_task.outputs["Output"],
             registered_model_name=registered_model_name,
@@ -360,6 +360,7 @@ def yolov8_pipeline(
             map50_95=eval_task.outputs["Output"],
         )
     )
+    register_task.set_caching_options(enable_caching=False)
 
 
 # ---------------------------------------------------------------------------

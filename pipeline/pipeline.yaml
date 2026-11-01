@@ -386,8 +386,7 @@ root:
         taskInfo:
           name: load-data
       register:
-        cachingOptions:
-          enableCache: true
+        cachingOptions: {}
         componentRef:
           name: comp-register
         dependentTasks:
