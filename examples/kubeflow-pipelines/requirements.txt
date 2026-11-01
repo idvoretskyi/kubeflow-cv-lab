@@ -1,2 +1,1 @@
-kfp>=2.7,<3
-kfp-kubernetes>=1.3
+-r ../../pipeline/requirements.txt

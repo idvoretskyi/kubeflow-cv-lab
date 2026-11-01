@@ -10,7 +10,7 @@ deploymentSpec:
       container:
         command:
         - nvidia-smi
-        image: nvidia/cuda:12.4.1-base-ubuntu22.04
+        image: nvidia/cuda:13.4.2-base-ubuntu24.04
         resources:
           accelerator:
             count: '1'
@@ -31,7 +31,7 @@ root:
         taskInfo:
           name: nvidia-smi
 schemaVersion: 2.1.0
-sdkVersion: kfp-2.16.1
+sdkVersion: kfp-2.17.0
 ---
 platforms:
   kubernetes:

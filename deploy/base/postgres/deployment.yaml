@@ -7,6 +7,8 @@ metadata:
     app: postgres
 spec:
   replicas: 1
+  strategy:
+    type: Recreate   # RWO volume: the old pod must release it first
   selector:
     matchLabels:
       app: postgres
@@ -15,27 +17,26 @@ spec:
       labels:
         app: postgres
       annotations:
-        # Keep Postgres outside the Istio mesh to avoid mTLS complexity.
         sidecar.istio.io/inject: "false"
     spec:
+      # CPU-only; may use spare capacity on the GPU node of the 2-node
+      # reference cluster. Never requests a GPU.
       tolerations:
-        # Allow scheduling on GPU nodes (the system pool is undersized;
-        # GPU node has ample RAM and this pod requests no GPU resource).
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: postgres:18-alpine
           ports:
             - containerPort: 5432
           envFrom:
             - secretRef:
                 name: postgres-credentials
           volumeMounts:
+            # Postgres 18 images keep data in /var/lib/postgresql/<major>/docker
             - name: data
-              mountPath: /var/lib/postgresql/data
-              subPath: pgdata
+              mountPath: /var/lib/postgresql
           resources:
             requests:
               cpu: 100m
@@ -44,7 +45,7 @@ spec:
               memory: 512Mi
           readinessProbe:
             exec:
-              command: [pg_isready, -U, mlflow]
+              command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
             initialDelaySeconds: 5
             periodSeconds: 5
       volumes:

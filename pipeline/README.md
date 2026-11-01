@@ -1,62 +1,52 @@
 # pipeline/
 
-Kubeflow Pipeline (KFP v2): end-to-end YOLOv8 training on the
-[Aquarium Combined](https://universe.roboflow.com/roboflow-jvuqo/aquarium-combined)
-dataset.
+KFP v2 pipeline `yolov8-training`: `load_data → train → evaluate → register`.
 
-## Stages
-
-```text
-load_data → train → evaluate → register
-```
-
-| Step | Image | GPU | What it does |
-|---|---|---|---|
-| `load_data` | `python:3.11-slim` + roboflow | No | Downloads dataset from Roboflow Universe (YOLOv8 format) |
-| `train` | `ultralytics/ultralytics` + mlflow | **Yes** | Trains `yolov8n.pt`; logs params/metrics/weights to MLflow via proxied artifacts |
-| `evaluate` | `ultralytics/ultralytics` + mlflow | No | Runs `val`; logs `mAP50` / `mAP50-95` to the existing MLflow run |
-| `register` | `python:3.11-slim` + mlflow + boto3 | No | Registers model in MLflow Model Registry; returns `models:/yolov8-aquarium/<version>` |
-
-## Prerequisites
-
-- `cv-lab` Profile applied (`kubectl apply -f deploy/profile.yaml`)
-- Secrets present in `cv-lab`: `roboflow-api-key`, `seaweedfs-s3-credentials`, `postgres-credentials`
-- MLflow running (`kubectl rollout status deployment/mlflow -n cv-lab`)
-- `s3://mlflow` bucket created (`kubectl apply -f deploy/mlflow/create-bucket-job.yaml`)
-
-## Compile
+| File | Purpose |
+|---|---|
+| `pipeline.py` | Pipeline source |
+| `pipeline.yaml` | Compiled IR (committed; CI fails on drift) |
+| `gpu_scheduling.py` | Shared GPU scheduling contract (also used by `examples/`) |
+| `versions.py` | Pinned MLflow version and base images |
+| `requirements.txt` | Pinned KFP SDK (`kfp==2.17.0`, `kfp-kubernetes==2.17.0`) |
 
 ```bash
-make compile          # pipeline/pipeline.py → pipeline/pipeline.yaml
+make compile   # pipeline.py -> pipeline.yaml (commit the result)
 ```
 
-The compiled `pipeline.yaml` is committed; CI fails on drift.
+Upload `pipeline.yaml` in the Kubeflow Pipelines UI and create a run.
 
-## Submit (in-cluster Notebook)
+## Steps
 
-From a Kubeflow Notebook running in the `cv-lab` profile:
+| Step | Image | Resources | Notes |
+|---|---|---|---|
+| `load_data` | `python:3.12-slim` | CPU | Downloads a YOLO-format zip and patches `data.yaml` |
+| `train` | `ultralytics/ultralytics:8.4.174` | **1 GPU**, 2 vCPU, 6–12 Gi, 2 Gi `/dev/shm` | Logs to MLflow, returns the run ID |
+| `evaluate` | `ultralytics/ultralytics:8.4.174` | CPU, 1 vCPU, 2–4 Gi | Logs `val/mAP50` and `val/mAP50-95` |
+| `register` | `python:3.12-slim` | CPU | Creates a model version, tags mAP, sets alias `champion` |
 
-```python
-import kfp
-client = kfp.Client()          # uses in-cluster SA token automatically
-client.create_run_from_pipeline_package(
-    "pipeline.yaml",
-    arguments={},              # all params have defaults
-    run_name="aquarium-yolov8-run-1",
-    experiment_name="aquarium-yolov8",
-)
+## Parameters
+
+| Parameter | Default |
+|---|---|
+| `dataset_url` | `https://ultralytics.com/assets/coco128.zip` |
+| `dataset_yaml_url` | Ultralytics `coco128.yaml` (leave empty if the zip has `data.yaml`) |
+| `model_variant` | `yolov8n.pt` |
+| `epochs` | `10` |
+| `imgsz` | `640` |
+| `mlflow_tracking_uri` | `http://mlflow.cv-lab:5000` |
+| `experiment_name` | `coco128-yolov8` |
+| `registered_model_name` | `yolov8-coco128` |
+
+## GPU scheduling
+
+See `gpu_scheduling.py`. GPU steps request `nvidia.com/gpu: 1`, tolerate the
+`nvidia.com/gpu` taint, and select `nvidia.com/gpu.present=true` (the GFD label).
+CPU steps only tolerate the taint (`GPU_TOLERATE_CPU_STEPS=0` disables this).
+Override the selector at compile time, for example for strict LKE pool pinning:
+
+```bash
+GPU_NODE_SELECTOR_KEY=nodepool.lke/role GPU_NODE_SELECTOR_VALUE=gpu make compile
 ```
 
-## Pipeline parameters
-
-| Parameter | Default | Description |
-|---|---|---|
-| `roboflow_workspace` | `roboflow-jvuqo` | Roboflow workspace slug |
-| `roboflow_project` | `aquarium-combined` | Project slug |
-| `roboflow_version` | `6` | Dataset version (latest) |
-| `model_variant` | `yolov8n.pt` | Ultralytics model checkpoint |
-| `epochs` | `10` | Training epochs (raise to 50+ for real runs) |
-| `imgsz` | `640` | Input image size |
-| `mlflow_tracking_uri` | `http://mlflow.cv-lab:5000` | MLflow server (in-cluster) |
-| `experiment_name` | `aquarium-yolov8` | MLflow experiment name |
-| `registered_model_name` | `yolov8-aquarium` | MLflow Model Registry name |
+Do not commit YAML compiled with cloud-specific labels.

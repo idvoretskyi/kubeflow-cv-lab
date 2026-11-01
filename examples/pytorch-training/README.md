@@ -1,6 +1,6 @@
 # PyTorch GPU Training Example (Kubeflow Trainer v2)
 
-A minimal GPU training job for validating the **Kubeflow Training Operator** and
+A minimal GPU training job for validating **Kubeflow Trainer v2** and the
 NVIDIA GPU stack. Uses a 3-layer fully-connected network (784 → 256 → 128 → 10)
 trained on synthetic MNIST-sized data for 200 steps via the Trainer v2 `TrainJob`
 API.
@@ -51,7 +51,10 @@ kubectl logs -l trainer.kubeflow.org/trainjob-name=pytorch-mnist-gpu -n kubeflow
 | CUDA available | `True` — NVIDIA driver + container toolkit working |
 | Training throughput | ~200 steps in < 60 s on RTX 4000 Ada |
 
-## Validation result (cluster lke609184, Kubeflow 26.03)
+## Example output (earlier validation: PyTorch 2.3, Kubeflow 26.03 on LKE)
+
+The manifest now uses `pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime`, so
+version strings will differ.
 
 ```text
 PyTorch version : 2.3.0+cu121

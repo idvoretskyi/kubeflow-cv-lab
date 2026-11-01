@@ -6,7 +6,7 @@ then serves inference requests over the KServe V1 prediction protocol.
 Environment variables
 ---------------------
 MODEL_NAME            KServe model name            (default: yolov8-coco128)
-MODEL_URI             MLflow model URI             (default: models:/yolov8-coco128/1)
+MODEL_URI             MLflow model URI             (default: models:/yolov8-coco128@champion)
 MLFLOW_TRACKING_URI   MLflow server URL            (default: http://mlflow.cv-lab:5000)
 
 Request format
@@ -40,7 +40,7 @@ import os
 import tempfile
 
 import kserve
-import mlflow
+import mlflow.artifacts
 from PIL import Image
 
 logging.basicConfig(
@@ -58,7 +58,7 @@ class YOLOv8Model(kserve.Model):
         self.mlflow_tracking_uri: str = os.environ.get(
             "MLFLOW_TRACKING_URI", "http://mlflow.cv-lab:5000"
         )
-        self.model_uri: str = os.environ.get("MODEL_URI", "models:/yolov8-coco128/1")
+        self.model_uri: str = os.environ.get("MODEL_URI", "models:/yolov8-coco128@champion")
         self._model_dir: str = tempfile.mkdtemp(prefix="yolo_weights_")
         self.yolo = None
         self.ready = False
@@ -117,6 +117,6 @@ class YOLOv8Model(kserve.Model):
 if __name__ == "__main__":
     model_name: str = os.environ.get("MODEL_NAME", "yolov8-coco128")
     model = YOLOv8Model(name=model_name)
-    # kserve 0.16 checks model.ready *before* calling model.start(); load first.
+    # KServe checks model.ready before start(); load first.
     model.load()
     kserve.ModelServer().start([model])

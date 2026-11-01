@@ -1,16 +1,19 @@
-#!/usr/bin/env sh
+#!/bin/sh
 # uninstall.sh — Remove the Kubeflow Platform installed by install.sh.
 #
 # This script deletes all Kubeflow namespaces and CRDs from the cluster. It
 # does NOT touch the GPU operator or any other cluster infrastructure.
 #
-# Configuration:
-#   KF_VERSION  — kubeflow/manifests version to clone for deletion manifests
-#                 (default: 26.03). Can also be set in platform/config.env.
+# Deletion uses the upstream `example` kustomization, a superset of both
+# KF_PROFILE=minimal and full, so it works for either install profile.
+#
+# Configuration (same sources as install.sh: PRESET, config.env, env vars):
+#   KF_VERSION  — kubeflow/manifests tag to clone (default: 26.03.1)
+#   KF_YES=1    — skip the confirmation prompt (or pass --yes)
 #
 # Usage:
 #   ./platform/uninstall.sh
-#   KF_VERSION=26.03 ./platform/uninstall.sh
+#   ./platform/uninstall.sh --yes
 
 set -eu
 
@@ -18,12 +21,19 @@ set -eu
 # Source config.env if present.
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ "${1:-}" = "--yes" ] || [ "${1:-}" = "-y" ]; then
+  KF_YES=1
+fi
+if [ -n "${PRESET:-}" ] && [ -f "${SCRIPT_DIR}/presets/${PRESET}.env" ]; then
+  # shellcheck source=/dev/null
+  . "${SCRIPT_DIR}/presets/${PRESET}.env"
+fi
 if [ -f "${SCRIPT_DIR}/config.env" ]; then
   # shellcheck source=/dev/null
   . "${SCRIPT_DIR}/config.env"
 fi
 
-KF_VERSION="${KF_VERSION-26.03}"
+KF_VERSION="${KF_VERSION-26.03.1}"
 
 # ---------------------------------------------------------------------------
 # Preflight.
@@ -43,8 +53,12 @@ fi
 echo "Uninstalling Kubeflow ${KF_VERSION} …"
 echo ""
 echo "WARNING: This will delete all Kubeflow namespaces, CRDs, and resources."
-printf "Continue? [y/N] "
-read -r REPLY
+if [ "${KF_YES:-}" = "1" ]; then
+  REPLY=y
+else
+  printf "Continue? [y/N] "
+  read -r REPLY
+fi
 case "$REPLY" in
   [yY][eE][sS]|[yY]) ;;
   *) echo "Aborted."; exit 0 ;;

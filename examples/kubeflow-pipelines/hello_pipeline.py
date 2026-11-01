@@ -11,17 +11,19 @@ Or:
     kfp dsl compile --py hello_pipeline.py --output hello_pipeline.yaml
 """
 
-from kfp import dsl
+import pathlib
+
+from kfp import compiler, dsl
 
 
-@dsl.component(base_image="python:3.11-slim")
+@dsl.component(base_image="python:3.12-slim")
 def say_hello(name: str) -> str:
     greeting = f"Hello, {name}!"
     print(greeting)
     return greeting
 
 
-@dsl.component(base_image="python:3.11-slim")
+@dsl.component(base_image="python:3.12-slim")
 def shout(text: str) -> str:
     loud = text.upper()
     print(loud)
@@ -39,9 +41,7 @@ def hello_pipeline(name: str = "Kubeflow") -> str:
 
 
 if __name__ == "__main__":
-    from kfp import compiler
-
     compiler.Compiler().compile(
         pipeline_func=hello_pipeline,
-        package_path="hello_pipeline.yaml",
+        package_path=str(pathlib.Path(__file__).with_suffix(".yaml")),
     )

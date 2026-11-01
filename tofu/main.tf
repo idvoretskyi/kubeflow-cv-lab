@@ -1,70 +1,38 @@
-# ----------------------------------------------------------------------------
-# Prerequisites — applied separately (not managed by this Tofu module)
-# ----------------------------------------------------------------------------
-# 1. Secrets — created outside Tofu to avoid storing credentials in state:
-#      kubectl apply -f deploy/postgres/secret.yaml     (from secret.example.yaml)
-#      kubectl apply -f secrets/seaweedfs-s3-credentials.yaml
-#      kubectl apply -f secrets/roboflow-api-key.yaml
+# Optional, state-tracked alternative to `make deploy`.
 #
-# 2. Kubeflow Profile CR — creates cv-lab namespace + RBAC:
-#      kubectl apply -f deploy/profile.yaml
-#    The Profile CRD is installed by platform/install.sh; run this after Kubeflow
-#    is up. The cv-lab namespace must exist before resources below can be planned.
-#
-# 3. SeaweedFS mlflow bucket — one-shot Job (run once):
-#      kubectl apply -f deploy/mlflow/create-bucket-job.yaml
-# ----------------------------------------------------------------------------
+# Applies the very same manifests as `kubectl apply -k deploy/` (read from
+# deploy/base/ — no duplicated YAML). The only tofu-specific knob is the
+# Postgres StorageClass. Run `make bootstrap` first (Profile + Secrets are kept
+# out of tofu state on purpose).
 
-# Allow cv-lab namespace pods to reach SeaweedFS S3 (port 8333) in kubeflow ns.
-resource "kubernetes_manifest" "networkpolicy_seaweedfs" {
-  manifest = yamldecode(file("${path.module}/../deploy/cluster/networkpolicy-seaweedfs.yaml"))
-}
+locals {
+  base = "${path.module}/../deploy/base"
 
-# ----------------------------------------------------------------------------
-# Postgres (MLflow backend store)
-# ----------------------------------------------------------------------------
-
-# PVC — storageClass is the only cluster-specific parameter; all others are
-# cloud-neutral and match deploy/postgres/pvc.yaml.
-resource "kubernetes_manifest" "postgres_pvc" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "PersistentVolumeClaim"
-    metadata = {
-      name      = "postgres-pvc"
-      namespace = var.namespace
-    }
-    spec = {
-      # null → omit storageClassName → use cluster default StorageClass.
-      storageClassName = var.postgres_storage_class != "" ? var.postgres_storage_class : null
-      accessModes      = ["ReadWriteOnce"]
-      resources = {
-        requests = {
-          storage = "10Gi"
-        }
-      }
-    }
+  manifests = {
+    networkpolicy_seaweedfs = yamldecode(file("${local.base}/cluster/networkpolicy-seaweedfs.yaml"))
+    postgres_deployment     = yamldecode(file("${local.base}/postgres/deployment.yaml"))
+    postgres_service        = yamldecode(file("${local.base}/postgres/service.yaml"))
+    mlflow_deployment       = yamldecode(file("${local.base}/mlflow/deployment.yaml"))
+    mlflow_service          = yamldecode(file("${local.base}/mlflow/service.yaml"))
   }
+
+  pvc_base = yamldecode(file("${local.base}/postgres/pvc.yaml"))
+  # null -> attribute omitted -> cluster default StorageClass.
+  postgres_pvc = merge(local.pvc_base, {
+    spec = merge(local.pvc_base.spec, {
+      storageClassName = var.postgres_storage_class != "" ? var.postgres_storage_class : null
+    })
+  })
 }
 
-resource "kubernetes_manifest" "postgres_deployment" {
-  manifest   = yamldecode(file("${path.module}/../deploy/postgres/deployment.yaml"))
+resource "kubernetes_manifest" "postgres_pvc" {
+  manifest = local.postgres_pvc
+}
+
+resource "kubernetes_manifest" "lab" {
+  for_each = local.manifests
+  manifest = each.value
+
   depends_on = [kubernetes_manifest.postgres_pvc]
 }
 
-resource "kubernetes_manifest" "postgres_service" {
-  manifest = yamldecode(file("${path.module}/../deploy/postgres/service.yaml"))
-}
-
-# ----------------------------------------------------------------------------
-# MLflow (tracking server + proxied artifact server)
-# ----------------------------------------------------------------------------
-
-resource "kubernetes_manifest" "mlflow_deployment" {
-  manifest   = yamldecode(file("${path.module}/../deploy/mlflow/deployment.yaml"))
-  depends_on = [kubernetes_manifest.postgres_deployment]
-}
-
-resource "kubernetes_manifest" "mlflow_service" {
-  manifest = yamldecode(file("${path.module}/../deploy/mlflow/service.yaml"))
-}
