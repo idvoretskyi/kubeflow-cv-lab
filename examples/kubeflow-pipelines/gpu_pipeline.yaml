@@ -31,7 +31,7 @@ root:
         taskInfo:
           name: nvidia-smi
 schemaVersion: 2.1.0
-sdkVersion: kfp-2.16.1
+sdkVersion: kfp-2.18.0
 ---
 platforms:
   kubernetes:
