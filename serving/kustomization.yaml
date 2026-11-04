@@ -5,3 +5,9 @@ namespace: cv-lab
 
 resources:
   - inference-service.yaml
+
+# Predictor image tag lives here: pin a sha-<commit> tag for reproducible runs
+# (`kustomize edit set image` or edit newTag). Default tracks main.
+images:
+  - name: ghcr.io/idvoretskyi/kubeflow-cv-lab-serving
+    newTag: latest
