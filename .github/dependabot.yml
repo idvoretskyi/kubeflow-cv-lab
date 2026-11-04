@@ -24,6 +24,10 @@ updates:
       python:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # Bumped by hand together with pipeline/versions.py (CI checks parity);
+      # security updates are not affected by this ignore.
+      - dependency-name: mlflow-skinny
     labels: [dependencies, python]
 
   - package-ecosystem: docker

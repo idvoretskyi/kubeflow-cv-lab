@@ -119,10 +119,18 @@ jobs:
           python pipeline/pipeline.py
           python examples/kubeflow-pipelines/hello_pipeline.py
           python examples/kubeflow-pipelines/gpu_pipeline.py
-          if ! git diff --exit-code -- pipeline/pipeline.yaml examples/kubeflow-pipelines/*.yaml; then
-            echo "::error::Compiled pipeline YAML is out of date. Run 'make compile' and commit the result."
+          if [ -n "$(git status --porcelain -- pipeline/pipeline.yaml examples/kubeflow-pipelines)" ]; then
+            git diff -- pipeline/pipeline.yaml examples/kubeflow-pipelines
+            echo "::error::Compiled pipeline YAML is out of date. Run 'make compile examples-compile' and commit the result."
             exit 1
           fi
+
+      - name: Check MLflow pin parity
+        run: |
+          v=$(python -c "import sys; sys.path.insert(0, 'pipeline'); from versions import MLFLOW_VERSION; print(MLFLOW_VERSION)")
+          grep -q "mlflow-skinny==${v}\$" images/serving/requirements.txt || { echo "::error::images/serving/requirements.txt is not mlflow-skinny==${v}"; exit 1; }
+          n=$(grep -c "ghcr.io/mlflow/mlflow:v${v}\$" deploy/base/mlflow/deployment.yaml)
+          [ "$n" -eq 2 ] || { echo "::error::deploy/base/mlflow/deployment.yaml must use ghcr.io/mlflow/mlflow:v${v} in both containers (found $n)"; exit 1; }
 
   markdownlint:
     name: Markdown lint
