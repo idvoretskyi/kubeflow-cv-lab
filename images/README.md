@@ -9,7 +9,7 @@ KServe custom predictor that wraps Ultralytics YOLO, published as
 |---|---|
 | `Dockerfile` | `python:3.12-slim` + CPU-only PyTorch 2.14.1, runs as non-root |
 | `server.py` | `kserve.Model` subclass that loads weights from MLflow and serves the V1 predict API |
-| `requirements.txt` | `ultralytics==8.4.174`, `kserve>=0.18,<0.19`, `mlflow-skinny==3.17.0`, `Pillow` |
+| `requirements.txt` | `ultralytics==8.4.174`, `kserve>=0.18,<0.19`, `mlflow-skinny==3.17.2`, `Pillow` |
 
 `.github/workflows/build-serving.yml` builds the image on every PR that touches
 `images/serving/**` and pushes it from `main`.

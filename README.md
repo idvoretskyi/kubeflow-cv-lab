@@ -44,9 +44,9 @@ To fit two nodes:
 
 | Component | Version |
 |---|---|
-| Kubeflow manifests | 26.03.1 (KFP SDK 2.17.0, KServe 0.18, Trainer v2) |
+| Kubeflow manifests | 26.03.1 (KFP SDK 2.17.3, KServe 0.18, Trainer v2) |
 | Object store | SeaweedFS (Kubeflow upstream default) |
-| MLflow | 3.17.0 + PostgreSQL 18 |
+| MLflow | 3.17.2 + PostgreSQL 18 |
 | Ultralytics | 8.4.174 (YOLOv8n by default) |
 | Serving image | Python 3.12, PyTorch 2.14.1 (CPU), KServe SDK 0.18 |
 
