@@ -19,6 +19,15 @@ spec:
       annotations:
         sidecar.istio.io/inject: "false"
     spec:
+      # postgres:alpine uses uid/gid 70; running as it (not root) lets us drop
+      # all capabilities. fsGroup makes the volume writable for that user.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       # CPU-only; may use spare capacity on the GPU node of the 2-node
       # reference cluster. Never requests a GPU.
       tolerations:
@@ -28,6 +37,10 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
           ports:
             - containerPort: 5432
           envFrom:

@@ -13,5 +13,6 @@ resources:
   - postgres/pvc.yaml
   - postgres/deployment.yaml
   - postgres/service.yaml
+  - postgres/networkpolicy.yaml
   - mlflow/deployment.yaml
   - mlflow/service.yaml

@@ -30,8 +30,6 @@ command -v kubectl >/dev/null 2>&1 || die "kubectl not found"
 kubectl get crd profiles.kubeflow.org >/dev/null 2>&1 \
   || die "Profile CRD missing — run 'make platform-install' first"
 
-b64d() { base64 -d 2>/dev/null || base64 -D; }
-
 case "${KF_PROFILE_OWNER}" in
   *[!A-Za-z0-9@._+-]*|'') die "KF_PROFILE_OWNER must be an email-like value (got '${KF_PROFILE_OWNER}')" ;;
 esac
@@ -54,10 +52,18 @@ if kubectl -n "${NAMESPACE}" get secret postgres-credentials >/dev/null 2>&1; th
 else
   log "Creating Secret postgres-credentials (random password)"
   pw=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
-  kubectl -n "${NAMESPACE}" create secret generic postgres-credentials \
-    --from-literal=POSTGRES_USER=mlflow \
-    --from-literal=POSTGRES_PASSWORD="${pw}" \
-    --from-literal=POSTGRES_DB=mlflow
+  # Manifest on stdin keeps the password out of the process arguments.
+  kubectl -n "${NAMESPACE}" create -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+type: Opaque
+stringData:
+  POSTGRES_USER: mlflow
+  POSTGRES_PASSWORD: "${pw}"
+  POSTGRES_DB: mlflow
+EOF
 fi
 
 # --- 3. SeaweedFS S3 credentials ---------------------------------------------
@@ -68,18 +74,25 @@ if [ -n "${SEAWEEDFS_ACCESS_KEY:-}" ] && [ -n "${SEAWEEDFS_SECRET_KEY:-}" ]; the
 else
   log "Copying SeaweedFS S3 credentials from kubeflow/mlpipeline-minio-artifact"
   ak=$(kubectl -n kubeflow get secret mlpipeline-minio-artifact \
-        -o jsonpath='{.data.accesskey}' | b64d) \
+        -o go-template='{{index .data "accesskey" | base64decode}}') \
     || die "cannot read kubeflow/mlpipeline-minio-artifact (set SEAWEEDFS_ACCESS_KEY/SECRET_KEY)"
   sk=$(kubectl -n kubeflow get secret mlpipeline-minio-artifact \
-        -o jsonpath='{.data.secretkey}' | b64d)
+        -o go-template='{{index .data "secretkey" | base64decode}}') \
+    || die "cannot read kubeflow/mlpipeline-minio-artifact secretkey"
 fi
 if [ -z "${ak}" ] || [ -z "${sk}" ]; then
   die "empty SeaweedFS credentials"
 fi
 
-kubectl -n "${NAMESPACE}" create secret generic seaweedfs-s3-credentials \
-  --from-literal=AWS_ACCESS_KEY_ID="${ak}" \
-  --from-literal=AWS_SECRET_ACCESS_KEY="${sk}" \
-  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n "${NAMESPACE}" apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: seaweedfs-s3-credentials
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "${ak}"
+  AWS_SECRET_ACCESS_KEY: "${sk}"
+EOF
 
 log "Bootstrap complete. Next: make deploy"

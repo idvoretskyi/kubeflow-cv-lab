@@ -14,24 +14,37 @@ locals {
     postgres_service        = yamldecode(file("${local.base}/postgres/service.yaml"))
     mlflow_deployment       = yamldecode(file("${local.base}/mlflow/deployment.yaml"))
     mlflow_service          = yamldecode(file("${local.base}/mlflow/service.yaml"))
+    postgres_netpol         = yamldecode(file("${local.base}/postgres/networkpolicy.yaml"))
   }
 
+  # Same label deploy/base/kustomization.yaml adds, so both paths match.
+  common_labels = { "app.kubernetes.io/part-of" = "kubeflow-cv-lab" }
+
   pvc_base = yamldecode(file("${local.base}/postgres/pvc.yaml"))
-  # null -> attribute omitted -> cluster default StorageClass.
+  # Empty storage class -> attribute omitted -> cluster default StorageClass.
   postgres_pvc = merge(local.pvc_base, {
-    spec = merge(local.pvc_base.spec, {
-      storageClassName = var.postgres_storage_class != "" ? var.postgres_storage_class : null
-    })
+    spec = merge(
+      local.pvc_base.spec,
+      var.postgres_storage_class != "" ? { storageClassName = var.postgres_storage_class } : {}
+    )
   })
 }
 
 resource "kubernetes_manifest" "postgres_pvc" {
-  manifest = local.postgres_pvc
+  manifest = merge(local.postgres_pvc, {
+    metadata = merge(local.postgres_pvc.metadata, {
+      labels = merge(try(local.postgres_pvc.metadata.labels, {}), local.common_labels)
+    })
+  })
 }
 
 resource "kubernetes_manifest" "lab" {
   for_each = local.manifests
-  manifest = each.value
+  manifest = merge(each.value, {
+    metadata = merge(each.value.metadata, {
+      labels = merge(try(each.value.metadata.labels, {}), local.common_labels)
+    })
+  })
 
   depends_on = [kubernetes_manifest.postgres_pvc]
 }
