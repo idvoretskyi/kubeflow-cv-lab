@@ -32,6 +32,10 @@ kubectl get crd profiles.kubeflow.org >/dev/null 2>&1 \
 
 b64d() { base64 -d 2>/dev/null || base64 -D; }
 
+case "${KF_PROFILE_OWNER}" in
+  *[!A-Za-z0-9@._+-]*|'') die "KF_PROFILE_OWNER must be an email-like value (got '${KF_PROFILE_OWNER}')" ;;
+esac
+
 # --- 1. Profile -------------------------------------------------------------
 log "Applying Profile ${NAMESPACE} (owner: ${KF_PROFILE_OWNER})"
 sed "s|name: user@example.com|name: ${KF_PROFILE_OWNER}|" "${SCRIPT_DIR}/profile.yaml" | kubectl apply -f -

@@ -9,7 +9,7 @@
 # Object store: since kubeflow/manifests 26.03, SeaweedFS is the upstream
 # default S3-compatible artifact store — no custom overlay is required.
 #
-# Configuration (environment variables, highest priority first):
+# Configuration (precedence: environment > config.env > PRESET > defaults):
 #
 #   KF_VERSION            - kubeflow/manifests git tag (default: 26.03.1)
 #
@@ -82,7 +82,10 @@ if [ -n "${PRESET:-}" ]; then
   PRESET_FILE="${SCRIPT_DIR}/presets/${PRESET}.env"
   if [ ! -f "${PRESET_FILE}" ]; then
     echo "Error: preset file '${PRESET_FILE}' not found." >&2
-    AVAILABLE=$(find "${SCRIPT_DIR}/presets" -name '*.env' -exec basename {} .env \; 2>/dev/null | tr '\n' ' ')
+    AVAILABLE=""
+    for f in "${SCRIPT_DIR}"/presets/*.env; do
+      [ -f "$f" ] && AVAILABLE="${AVAILABLE}$(basename "$f" .env) "
+    done
     echo "  Available presets: ${AVAILABLE}" >&2
     exit 1
   fi
@@ -146,7 +149,9 @@ echo ""
 # ---------------------------------------------------------------------------
 WORKDIR="$(mktemp -d)"
 cleanup() { rm -rf "$WORKDIR"; }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ---------------------------------------------------------------------------
 # Clone kubeflow/manifests at the requested version.
@@ -306,7 +311,11 @@ fi
 echo "Applying Kubeflow manifests (profile: ${KF_PROFILE}; this can take 10–20 minutes) …"
 attempt=1
 max_attempts=30
-until kustomize build "${OVERLAY}" | kubectl apply --server-side --force-conflicts -f -; do
+if ! kustomize build "${OVERLAY}" > "${WORKDIR}/rendered.yaml"; then
+  echo "Error: kustomize build failed for profile '${KF_PROFILE}'." >&2
+  exit 1
+fi
+until kubectl apply --server-side --force-conflicts -f "${WORKDIR}/rendered.yaml"; do
   if [ "$attempt" -ge "$max_attempts" ]; then
     echo "Error: Kubeflow apply did not converge after ${max_attempts} attempts." >&2
     exit 1

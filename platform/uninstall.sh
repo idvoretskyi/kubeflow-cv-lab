@@ -18,20 +18,28 @@
 set -eu
 
 # ---------------------------------------------------------------------------
-# Source config.env if present.
+# Source preset then config.env; an explicitly supplied KF_VERSION wins.
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ "${1:-}" = "--yes" ] || [ "${1:-}" = "-y" ]; then
   KF_YES=1
 fi
-if [ -n "${PRESET:-}" ] && [ -f "${SCRIPT_DIR}/presets/${PRESET}.env" ]; then
+CLI_KF_VERSION_SET=${KF_VERSION+x}
+CLI_KF_VERSION=${KF_VERSION-}
+if [ -n "${PRESET:-}" ]; then
+  PRESET_FILE="${SCRIPT_DIR}/presets/${PRESET}.env"
+  if [ ! -f "${PRESET_FILE}" ]; then
+    echo "Error: preset file '${PRESET_FILE}' not found." >&2
+    exit 1
+  fi
   # shellcheck source=/dev/null
-  . "${SCRIPT_DIR}/presets/${PRESET}.env"
+  . "${PRESET_FILE}"
 fi
 if [ -f "${SCRIPT_DIR}/config.env" ]; then
   # shellcheck source=/dev/null
   . "${SCRIPT_DIR}/config.env"
 fi
+if [ -n "${CLI_KF_VERSION_SET}" ]; then KF_VERSION=${CLI_KF_VERSION}; fi
 
 KF_VERSION="${KF_VERSION-26.03.1}"
 
@@ -69,7 +77,9 @@ esac
 # ---------------------------------------------------------------------------
 WORKDIR="$(mktemp -d)"
 cleanup() { rm -rf "$WORKDIR"; }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "Cloning kubeflow/manifests at ${KF_VERSION} …"
 git clone --depth 1 --branch "${KF_VERSION}" \
