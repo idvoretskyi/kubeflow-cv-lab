@@ -10,9 +10,11 @@
 # Configuration (same sources as install.sh: PRESET, config.env, env vars):
 #   KF_VERSION  — kubeflow/manifests tag to clone (default: 26.03.1)
 #   KF_YES=1    — skip the confirmation prompt (or pass --yes)
-#   KF_REMOVE_LAB=1 — also delete the cv-lab Profile/namespace (MLflow, Postgres,
-#                     KServe, all data in them) and the SeaweedFS NetworkPolicy
-#                     (or pass --with-lab). Off by default.
+#   KF_REMOVE_LAB=1 — acknowledge that the cv-lab layer (Profile, namespace,
+#                     MLflow, Postgres + PVC, InferenceService) is deleted too,
+#                     and remove its SeaweedFS NetworkPolicy (or pass --with-lab).
+#                     Required when cv-lab exists: removing the Profiles/KServe
+#                     CRDs destroys it anyway, so the script refuses otherwise.
 #
 # Usage:
 #   ./platform/uninstall.sh
@@ -65,6 +67,18 @@ if ! kubectl cluster-info > /dev/null 2>&1; then
   exit 1
 fi
 
+if [ "${KF_REMOVE_LAB:-}" != "1" ] && {
+  kubectl get namespace cv-lab > /dev/null 2>&1 ||
+    kubectl get profile cv-lab > /dev/null 2>&1
+}; then
+  echo "Error: the cv-lab layer exists and uninstalling Kubeflow would delete it" >&2
+  echo "  (Profile -> namespace -> Postgres PVC, and the KServe InferenceService)." >&2
+  echo "  Back up first if you need the data, e.g.:" >&2
+  echo "    kubectl -n cv-lab exec deploy/postgres -- sh -c 'pg_dump -U \"\$POSTGRES_USER\" \"\$POSTGRES_DB\"' > mlflow.sql" >&2
+  echo "  then re-run with --with-lab (or KF_REMOVE_LAB=1) to confirm." >&2
+  exit 1
+fi
+
 echo "Uninstalling Kubeflow ${KF_VERSION} …"
 echo ""
 echo "WARNING: This will delete all Kubeflow namespaces, CRDs, and resources."
@@ -98,7 +112,7 @@ cd "${WORKDIR}/manifests"
 # Delete in reverse order (resources before CRDs).
 # ---------------------------------------------------------------------------
 if [ "${KF_REMOVE_LAB:-}" = "1" ]; then
-  echo "Deleting the cv-lab layer (Profile, namespace, SeaweedFS NetworkPolicy) …"
+  echo "Deleting the cv-lab layer (Profile, namespace, data, SeaweedFS NetworkPolicy) …"
   kubectl delete profile cv-lab --ignore-not-found=true --wait=true || \
     echo "Warning: could not delete the cv-lab Profile." >&2
   kubectl -n kubeflow delete networkpolicy allow-cv-lab-to-seaweedfs --ignore-not-found=true || true

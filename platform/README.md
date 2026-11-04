@@ -61,11 +61,13 @@ make platform-uninstall
 ./platform/uninstall.sh --yes
 ```
 
-By default only Kubeflow is removed; the lab layer (`cv-lab` namespace with
-MLflow, Postgres and their data) is kept. Add `--with-lab` (or `KF_REMOVE_LAB=1`)
-to also delete the `cv-lab` Profile/namespace and the lab's SeaweedFS
-NetworkPolicy. An explicit `KF_VERSION` wins over `config.env`, as in the
-installer.
+Removing Kubeflow also removes the lab layer: deleting the Profiles and KServe
+CRDs deletes the `cv-lab` Profile, its namespace (MLflow, Postgres and the
+Postgres PVC) and the InferenceService. If `cv-lab` exists the script therefore
+**refuses to run** unless you confirm with `--with-lab` (or `KF_REMOVE_LAB=1`),
+which also removes the lab's SeaweedFS NetworkPolicy. Back up Postgres first
+(the error message shows a `pg_dump` command). An explicit `KF_VERSION` wins
+over `config.env`, as in the installer.
 
 ## Configuration
 

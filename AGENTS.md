@@ -64,7 +64,8 @@ These reflect the verified Kubeflow **26.03.1** layout. Code must conform to the
 - **The only permitted change to the `kubeflow` namespace** is one additive
   `NetworkPolicy` allowing `cv-lab → seaweedfs:8333`. Do not patch, delete, or
   re-point any upstream Kubeflow resource. (`uninstall.sh --with-lab` removes
-  only that lab-owned policy.)
+  only that lab-owned policy; `uninstall.sh` refuses to run while `cv-lab`
+  exists unless `--with-lab` confirms the lab is destroyed with Kubeflow.)
 - **Postgres is reachable only from MLflow** (`deploy/base/postgres/networkpolicy.yaml`);
   pods set `seccompProfile: RuntimeDefault`, drop all capabilities and disable
   privilege escalation. Keep new `cv-lab` workloads at least that strict.

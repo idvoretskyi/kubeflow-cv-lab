@@ -30,7 +30,7 @@ help: ## Show this help
 platform-install: ## Install Kubeflow (PRESET=lke, KF_PROFILE=minimal|full)
 	PRESET=$(PRESET) sh platform/install.sh
 
-platform-uninstall: ## Remove Kubeflow (add ARGS=--with-lab to also remove the cv-lab layer)
+platform-uninstall: ## Remove Kubeflow (needs ARGS=--with-lab if cv-lab exists; it is deleted too)
 	PRESET=$(PRESET) sh platform/uninstall.sh $(ARGS)
 
 # --- Lab layer ----------------------------------------------------------------
