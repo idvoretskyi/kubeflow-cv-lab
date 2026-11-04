@@ -389,8 +389,9 @@ case "${KF_WEBHOOK_ACCESS}" in
 
     # 2. Kubernetes Service endpoints (the virtual IP(s) the API server
     #    sends webhook calls from on some cluster configurations).
-    API_EPS="$(kubectl get endpoints kubernetes -n default \
-      -o jsonpath='{range .subsets[*]}{range .addresses[*]}{.ip}{"\n"}{end}{end}' \
+    API_EPS="$(kubectl get endpointslices -n default \
+      -l kubernetes.io/service-name=kubernetes \
+      -o jsonpath='{.items[*].endpoints[*].addresses[*]}' \
       2>/dev/null || true)"
     for ip in ${API_EPS}; do
       DETECTED_JSON="${DETECTED_JSON},{\"ipBlock\":{\"cidr\":\"${ip}/32\"}}"

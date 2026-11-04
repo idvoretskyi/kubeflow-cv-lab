@@ -61,6 +61,12 @@ make platform-uninstall
 ./platform/uninstall.sh --yes
 ```
 
+By default only Kubeflow is removed; the lab layer (`cv-lab` namespace with
+MLflow, Postgres and their data) is kept. Add `--with-lab` (or `KF_REMOVE_LAB=1`)
+to also delete the `cv-lab` Profile/namespace and the lab's SeaweedFS
+NetworkPolicy. An explicit `KF_VERSION` wins over `config.env`, as in the
+installer.
+
 ## Configuration
 
 All settings live in `platform/config.env` (copy from `config.env.example`).

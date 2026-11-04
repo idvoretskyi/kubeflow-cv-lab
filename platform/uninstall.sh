@@ -10,6 +10,9 @@
 # Configuration (same sources as install.sh: PRESET, config.env, env vars):
 #   KF_VERSION  — kubeflow/manifests tag to clone (default: 26.03.1)
 #   KF_YES=1    — skip the confirmation prompt (or pass --yes)
+#   KF_REMOVE_LAB=1 — also delete the cv-lab Profile/namespace (MLflow, Postgres,
+#                     KServe, all data in them) and the SeaweedFS NetworkPolicy
+#                     (or pass --with-lab). Off by default.
 #
 # Usage:
 #   ./platform/uninstall.sh
@@ -21,9 +24,13 @@ set -eu
 # Source preset then config.env; an explicitly supplied KF_VERSION wins.
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ "${1:-}" = "--yes" ] || [ "${1:-}" = "-y" ]; then
-  KF_YES=1
-fi
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y) KF_YES=1 ;;
+    --with-lab) KF_REMOVE_LAB=1 ;;
+    *) echo "Error: unknown argument '$arg' (use --yes, --with-lab)." >&2; exit 1 ;;
+  esac
+done
 CLI_KF_VERSION_SET=${KF_VERSION+x}
 CLI_KF_VERSION=${KF_VERSION-}
 if [ -n "${PRESET:-}" ]; then
@@ -90,14 +97,28 @@ cd "${WORKDIR}/manifests"
 # ---------------------------------------------------------------------------
 # Delete in reverse order (resources before CRDs).
 # ---------------------------------------------------------------------------
+if [ "${KF_REMOVE_LAB:-}" = "1" ]; then
+  echo "Deleting the cv-lab layer (Profile, namespace, SeaweedFS NetworkPolicy) …"
+  kubectl delete profile cv-lab --ignore-not-found=true --wait=true || \
+    echo "Warning: could not delete the cv-lab Profile." >&2
+  kubectl -n kubeflow delete networkpolicy allow-cv-lab-to-seaweedfs --ignore-not-found=true || true
+fi
+
+# Two passes: custom resources may only be deletable once the first pass has
+# processed their finalizers.
 echo "Deleting Kubeflow resources …"
-kustomize build example | kubectl delete --ignore-not-found=true -f - || true
+kustomize build example > "${WORKDIR}/example.yaml"
+for pass in 1 2; do
+  kubectl delete --ignore-not-found=true -f "${WORKDIR}/example.yaml" || \
+    echo "Warning: some resources could not be deleted on pass ${pass}." >&2
+done
 
 # Remove ClusterTrainingRuntimes if they were applied.
 RUNTIMES_OVERLAY="${WORKDIR}/manifests/applications/trainer/upstream/overlays/runtimes"
 if [ -d "${RUNTIMES_OVERLAY}" ]; then
   echo "Deleting ClusterTrainingRuntimes …"
-  kustomize build "${RUNTIMES_OVERLAY}" | kubectl delete --ignore-not-found=true -f - || true
+  kustomize build "${RUNTIMES_OVERLAY}" | kubectl delete --ignore-not-found=true -f - || \
+    echo "Warning: ClusterTrainingRuntimes could not be fully deleted." >&2
 fi
 
 echo ""
