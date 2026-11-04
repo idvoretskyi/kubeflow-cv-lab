@@ -159,6 +159,8 @@ def train(
     data_yamls = glob.glob(os.path.join(dataset.path, "**", "data.yaml"), recursive=True)
     if not data_yamls:
         raise FileNotFoundError(f"No data.yaml found under {dataset.path}")
+    if not data_yamls:
+        raise FileNotFoundError(f"no data.yaml found under {dataset.path}")
     data_yaml = data_yamls[0]
     print(f"Using data config: {data_yaml}")
 
@@ -185,7 +187,7 @@ def train(
             shutil.copy(best_candidates[0], dest)
         print(f"best.pt → {dest}")
     else:
-        print("WARNING: best.pt not found in train output")
+        raise FileNotFoundError("best.pt not found in train output")
 
     print(f"MLflow run_id: {run_id}")
     return run_id

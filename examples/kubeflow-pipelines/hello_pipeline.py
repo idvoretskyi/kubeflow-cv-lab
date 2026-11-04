@@ -12,18 +12,22 @@ Or:
 """
 
 import pathlib
+import sys
 
 from kfp import compiler, dsl
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "pipeline"))
+from versions import PYTHON_IMAGE  # noqa: E402
 
-@dsl.component(base_image="python:3.12-slim")
+
+@dsl.component(base_image=PYTHON_IMAGE)
 def say_hello(name: str) -> str:
     greeting = f"Hello, {name}!"
     print(greeting)
     return greeting
 
 
-@dsl.component(base_image="python:3.12-slim")
+@dsl.component(base_image=PYTHON_IMAGE)
 def shout(text: str) -> str:
     loud = text.upper()
     print(loud)

@@ -310,21 +310,23 @@ deploymentSpec:
           mlflow\": True})\n\n    # Locate the data.yaml inside the downloaded dataset.\n\
           \    data_yamls = glob.glob(os.path.join(dataset.path, \"**\", \"data.yaml\"\
           ), recursive=True)\n    if not data_yamls:\n        raise FileNotFoundError(f\"\
-          No data.yaml found under {dataset.path}\")\n    data_yaml = data_yamls[0]\n\
-          \    print(f\"Using data config: {data_yaml}\")\n\n    with mlflow.start_run()\
-          \ as run:\n        model = YOLO(model_variant)\n        model.train(\n \
-          \           data=data_yaml,\n            epochs=epochs,\n            imgsz=imgsz,\n\
-          \            project=model_dir.path,\n            name=\"train\",\n    \
-          \        exist_ok=True,\n            workers=2,  # /dev/shm is a 2 GiB memory-backed\
-          \ emptyDir (see pipeline)\n        )\n        run_id = run.info.run_id\n\
-          \n    # Copy best.pt to the canonical model_dir root so downstream steps\
-          \ find it.\n    best_candidates = glob.glob(\n        os.path.join(model_dir.path,\
-          \ \"**\", \"best.pt\"), recursive=True\n    )\n    if best_candidates:\n\
-          \        dest = os.path.join(model_dir.path, \"best.pt\")\n        if os.path.abspath(best_candidates[0])\
-          \ != os.path.abspath(dest):\n            shutil.copy(best_candidates[0],\
-          \ dest)\n        print(f\"best.pt \u2192 {dest}\")\n    else:\n        print(\"\
-          WARNING: best.pt not found in train output\")\n\n    print(f\"MLflow run_id:\
-          \ {run_id}\")\n    return run_id\n\n"
+          No data.yaml found under {dataset.path}\")\n    if not data_yamls:\n   \
+          \     raise FileNotFoundError(f\"no data.yaml found under {dataset.path}\"\
+          )\n    data_yaml = data_yamls[0]\n    print(f\"Using data config: {data_yaml}\"\
+          )\n\n    with mlflow.start_run() as run:\n        model = YOLO(model_variant)\n\
+          \        model.train(\n            data=data_yaml,\n            epochs=epochs,\n\
+          \            imgsz=imgsz,\n            project=model_dir.path,\n       \
+          \     name=\"train\",\n            exist_ok=True,\n            workers=2,\
+          \  # /dev/shm is a 2 GiB memory-backed emptyDir (see pipeline)\n       \
+          \ )\n        run_id = run.info.run_id\n\n    # Copy best.pt to the canonical\
+          \ model_dir root so downstream steps find it.\n    best_candidates = glob.glob(\n\
+          \        os.path.join(model_dir.path, \"**\", \"best.pt\"), recursive=True\n\
+          \    )\n    if best_candidates:\n        dest = os.path.join(model_dir.path,\
+          \ \"best.pt\")\n        if os.path.abspath(best_candidates[0]) != os.path.abspath(dest):\n\
+          \            shutil.copy(best_candidates[0], dest)\n        print(f\"best.pt\
+          \ \u2192 {dest}\")\n    else:\n        raise FileNotFoundError(\"best.pt\
+          \ not found in train output\")\n\n    print(f\"MLflow run_id: {run_id}\"\
+          )\n    return run_id\n\n"
         image: ultralytics/ultralytics:8.4.174
         resources:
           accelerator:

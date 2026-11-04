@@ -34,7 +34,12 @@ GPU_NODE_SELECTOR_KEY = os.environ.get("GPU_NODE_SELECTOR_KEY", "nvidia.com/gpu.
 GPU_NODE_SELECTOR_VALUE = os.environ.get("GPU_NODE_SELECTOR_VALUE", "true")
 GPU_TAINT_KEY = os.environ.get("GPU_TAINT_KEY", "nvidia.com/gpu")
 GPU_TAINT_EFFECT = os.environ.get("GPU_TAINT_EFFECT", "NoSchedule")
-GPU_TOLERATE_CPU_STEPS = os.environ.get("GPU_TOLERATE_CPU_STEPS", "1") not in ("0", "false", "")
+GPU_TOLERATE_CPU_STEPS = os.environ.get("GPU_TOLERATE_CPU_STEPS", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "",
+)
 
 
 def _tolerate_gpu_taint(task: dsl.PipelineTask) -> None:
