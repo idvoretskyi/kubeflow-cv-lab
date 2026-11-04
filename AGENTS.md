@@ -63,7 +63,11 @@ These reflect the verified Kubeflow **26.03.1** layout. Code must conform to the
 - **SeaweedFS pod label** is `app: seaweedfs` (not `app.kubernetes.io/name`).
 - **The only permitted change to the `kubeflow` namespace** is one additive
   `NetworkPolicy` allowing `cv-lab → seaweedfs:8333`. Do not patch, delete, or
-  re-point any upstream Kubeflow resource.
+  re-point any upstream Kubeflow resource. (`uninstall.sh --with-lab` removes
+  only that lab-owned policy.)
+- **Postgres is reachable only from MLflow** (`deploy/base/postgres/networkpolicy.yaml`);
+  pods set `seccompProfile: RuntimeDefault`, drop all capabilities and disable
+  privilege escalation. Keep new `cv-lab` workloads at least that strict.
 - **MLflow uses proxied artifacts** (`mlflow server --serve-artifacts
   --artifacts-destination s3://mlflow`). Training pods talk to MLflow over HTTP
   (`mlflow-artifacts:/`) and must not need direct S3 access or credentials.
