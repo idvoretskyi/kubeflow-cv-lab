@@ -60,9 +60,11 @@ jobs:
 
       - name: Install kubeconform
         run: |
-          curl -sSLf \
-            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
-            | tar -xz kubeconform
+          base="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}"
+          curl -sSLfO "${base}/kubeconform-linux-amd64.tar.gz"
+          curl -sSLfO "${base}/CHECKSUMS"
+          grep ' kubeconform-linux-amd64.tar.gz$' CHECKSUMS | sha256sum -c -
+          tar -xzf kubeconform-linux-amd64.tar.gz kubeconform
 
       - name: Build and validate kustomizations
         run: |
@@ -70,14 +72,17 @@ jobs:
           for k in deploy deploy/overlays/lke serving; do
             echo "::group::${k}"
             kubectl kustomize "${k}" | ./kubeconform -strict -summary \
-              -ignore-missing-schemas \
               -schema-location default \
               -schema-location \
               'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
               -
             echo "::endgroup::"
           done
-          ./kubeconform -strict -summary -ignore-missing-schemas \
+          # No published schema for TrainJob; everything else must validate.
+          ./kubeconform -strict -summary -skip TrainJob \
+            -schema-location default \
+            -schema-location \
+            'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             deploy/profile.yaml examples/pytorch-training/pytorch-mnist-gpu.yaml
 
   tofu:
