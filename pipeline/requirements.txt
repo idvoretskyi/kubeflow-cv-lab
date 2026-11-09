@@ -1,2 +1,2 @@
-kfp==2.17.3
-kfp-kubernetes==2.17.3
+kfp==2.18.0
+kfp-kubernetes==2.18.0

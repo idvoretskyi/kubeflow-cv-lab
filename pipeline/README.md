@@ -8,7 +8,7 @@ KFP v2 pipeline `yolov8-training`: `load_data → train → evaluate → registe
 | `pipeline.yaml` | Compiled IR (committed; CI fails on drift) |
 | `gpu_scheduling.py` | Shared GPU scheduling contract (also used by `examples/`) |
 | `versions.py` | Pinned MLflow version and base images |
-| `requirements.txt` | Pinned KFP SDK (`kfp==2.17.3`, `kfp-kubernetes==2.17.3`) |
+| `requirements.txt` | Pinned KFP SDK (`kfp==2.18.0`, `kfp-kubernetes==2.18.0`) |
 
 ```bash
 make compile   # pipeline.py -> pipeline.yaml (commit the result)
