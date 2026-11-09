@@ -60,9 +60,11 @@ jobs:
 
       - name: Install kubeconform
         run: |
+          set -euo pipefail
           base="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}"
-          curl -sSLfO "${base}/kubeconform-linux-amd64.tar.gz"
-          curl -sSLfO "${base}/CHECKSUMS"
+          curl_opts="-sSLfO --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20"
+          curl ${curl_opts} "${base}/kubeconform-linux-amd64.tar.gz"
+          curl ${curl_opts} "${base}/CHECKSUMS"
           grep ' kubeconform-linux-amd64.tar.gz$' CHECKSUMS | sha256sum -c -
           tar -xzf kubeconform-linux-amd64.tar.gz kubeconform
 
@@ -88,6 +90,8 @@ jobs:
   tofu:
     name: OpenTofu validate
     runs-on: ubuntu-latest
+    env:
+      TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tofu-plugin-cache
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -95,11 +99,24 @@ jobs:
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@v1
 
+      - name: Cache OpenTofu providers
+        uses: actions/cache@v4
+        with:
+          path: .tofu-plugin-cache
+          key: tofu-providers-${{ runner.os }}-${{ hashFiles('tofu/.terraform.lock.hcl') }}
+
       - name: fmt + validate
         working-directory: tofu
         run: |
+          set -eu
+          mkdir -p "${TF_PLUGIN_CACHE_DIR}"
           tofu fmt -check -recursive
-          tofu init -backend=false -input=false
+          for i in 1 2 3 4 5; do
+            tofu init -backend=false -input=false && break
+            [ "$i" -eq 5 ] && exit 1
+            echo "tofu init failed (attempt $i), retrying in $((i * 10))s"
+            sleep $((i * 10))
+          done
           tofu validate
 
   kfp-compile:
