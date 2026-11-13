@@ -1,6 +1,6 @@
 # Runtime deps for the KServe YOLO predictor. CPU-only torch/torchvision are
 # installed first in the Dockerfile so ultralytics does not pull CUDA wheels.
-ultralytics==8.4.174
+ultralytics==8.4.208
 # KServe SDK — match the cluster's KServe (v0.18 in Kubeflow 26.03.1).
 kserve>=0.18,<0.19
 # MLflow client — keep equal to the server (pipeline/versions.py MLFLOW_VERSION).
