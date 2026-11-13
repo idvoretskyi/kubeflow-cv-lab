@@ -5,4 +5,4 @@ ultralytics==8.4.174
 kserve>=0.18,<0.19
 # MLflow client — keep equal to the server (pipeline/versions.py MLFLOW_VERSION).
 mlflow-skinny==3.17.2
-Pillow>=11
+Pillow>=13.0.0
