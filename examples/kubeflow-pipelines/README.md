@@ -30,22 +30,17 @@ GPU nodes, so they stay on non-GPU nodes automatically.
 - Kubeflow installed (`make platform-install` from the repo root).
 - NVIDIA GPU operator running on the cluster (for the GPU pipeline).
 - `kubectl` pointed at the cluster.
-- For (re)compiling or submitting from Python: `make venv`.
+- For (re)compiling or submitting from Python: `make venv` (repo root).
 
 ## Compile
 
 The committed `*.yaml` are already up to date. To regenerate:
 
 ```bash
-make venv      # one-time: create .venv with kfp + kfp-kubernetes
-make compile   # hello_pipeline.py -> hello_pipeline.yaml, etc.
+make examples-compile   # from the repo root: hello/gpu_pipeline.py -> *.yaml
 ```
 
-Or from the repo root:
-
-```bash
-make examples-compile
-```
+The GPU pipeline reuses the shared contract in `pipeline/gpu_scheduling.py`.
 
 ## Run
 

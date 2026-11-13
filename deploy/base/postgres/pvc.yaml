@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: cv-lab
+spec:
+  # storageClassName omitted -> cluster default. Cloud-specific classes are set
+  # by overlays (deploy/overlays/lke) or tofu (var.postgres_storage_class).
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

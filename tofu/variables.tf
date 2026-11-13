@@ -10,17 +10,11 @@ variable "kubernetes_context" {
   default     = ""
 }
 
-variable "namespace" {
-  description = "Kubernetes namespace for cv-lab resources (MLflow, Postgres)."
-  type        = string
-  default     = "cv-lab"
-}
-
 variable "postgres_storage_class" {
   description = <<-EOT
     StorageClass name for the Postgres PVC.
-      - "linode-block-storage-retain" — persists the volume across node replacements
-        on Akamai LKE (recommended for the lab's default deployment).
+      - a retaining class (e.g. "linode-block-storage-retain" on Akamai LKE; see
+        deploy/overlays/lke) — persists the volume across node replacements.
       - "" (empty string, default) — omit storageClassName; Kubernetes will use the
         cluster default StorageClass.
     List available classes with: kubectl get storageclass
